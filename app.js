@@ -39,7 +39,7 @@
   }
 
   function cssVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#3987e5';
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#0b4f8a';
   }
 
   function groupColor(i) { return cssVar(SERIES[i % SERIES.length]); }
@@ -117,7 +117,6 @@
   }
 
   function recompute() {
-    var limit = 1 << state.numVars;
     try {
       state.result = LG.minimizeBoolean(state.numVars, state.minterms, state.dontCares, { vars: state.vars });
       var preset = state.preset ? LG.getPreset(state.preset) : null;
@@ -151,12 +150,12 @@
   function renderStats(r) {
     var sol = state.form === 'POS' ? r.pos : r.sop;
     var tiles = [
-      { label: 'Prime implicants', value: r.primeImplicants.length, detail: r.essentialPrimeImplicants.length + ' essential' },
-      { label: 'SOP terms', value: r.sop.termCount, detail: r.sop.literalCount + ' literals' },
-      { label: 'POS terms', value: r.pos.termCount, detail: r.pos.literalCount + ' literals' },
-      { label: 'Gate count', value: sol.gateCount.total, detail: sol.gateCount.not + ' NOT, ' + (sol.gateCount.and + sol.gateCount.or) + ' logic' },
-      { label: 'Propagation delay', value: sol.propagationDelay.estimate + ' ns', detail: sol.propagationDelay.levels + ' gate levels at 2 ns' },
-      { label: 'Care inputs', value: r.minterms.length + '/' + (1 << r.numVars), detail: r.dontCares.length + ' don\'t cares' }
+      { label: 'Prime Implicants', value: r.primeImplicants.length, detail: r.essentialPrimeImplicants.length + ' essential' },
+      { label: 'SOP Cost', value: r.sop.termCount + ' terms', detail: r.sop.literalCount + ' literals' },
+      { label: 'POS Cost', value: r.pos.termCount + ' sums', detail: r.pos.literalCount + ' literals' },
+      { label: 'Gate Count', value: sol.gateCount.total, detail: sol.gateCount.not + ' INV, ' + (sol.gateCount.and + sol.gateCount.or) + ' logic' },
+      { label: 'Critical Path Delay', value: sol.propagationDelay.estimate + ' ns', detail: sol.propagationDelay.levels + ' levels @ 2.0 ns' },
+      { label: 'On / Don\'t-Care', value: r.minterms.length + ' / ' + (1 << r.numVars), detail: r.dontCares.length + ' X states' }
     ];
     el.statRow.innerHTML = tiles.map(function (t) {
       return '<div class="stat-tile"><div class="label">' + esc(t.label) + '</div>' +
@@ -173,6 +172,12 @@
     return kmap.grayOrder.cols[g].toString(2).padStart(kmap.colVars, '0');
   }
 
+  function axisVarText(kmap) {
+    var rowNames = state.vars.slice(0, kmap.rowVars).join('');
+    var colNames = state.vars.slice(kmap.rowVars).join('');
+    return rowNames + ' \\ ' + colNames;
+  }
+
   function chosenCubes(r) {
     var sol = state.form === 'POS' ? r.pos : r.sop;
     return sol.implicants.slice(0, MAX_GROUPS);
@@ -186,7 +191,7 @@
     table.setAttribute('aria-label', 'Karnaugh map with ' + state.numVars + ' variables');
     var head = document.createElement('thead');
     var hr = document.createElement('tr');
-    hr.appendChild(svgHtml('th', 'corner', kmap.rowVars + ' \\ ' + kmap.colVars));
+    hr.appendChild(svgHtml('th', 'corner', axisVarText(kmap)));
     for (var c = 0; c < kmap.cols; c += 1) {
       hr.appendChild(svgHtml('th', '', colLabel(kmap, c)));
     }
@@ -247,14 +252,14 @@
         (badge ? '<span class="badge ' + (name === rec ? 'recommended' : '') + '">' + esc(badge) + '</span>' : '') + '</div>' +
         '<div class="formula">' + esc(sol.expression) + '</div>' +
         '<div class="meta">' + sol.termCount + ' terms, ' + sol.literalCount + ' literals, ' +
-        sol.gateCount.total + ' gates, ' + sol.propagationDelay.estimate + ' ns worst case</div></div>';
+        sol.gateCount.total + ' gates, ' + sol.propagationDelay.estimate + ' ns critical path</div></div>';
     }
-    el.solutionBlock.innerHTML = card('Minimal sum of products', r.sop, 'SOP', 'selected: ' + state.form) +
-      card('Minimal product of sums', r.pos, 'POS', '') +
-      '<div class="expr-card"><div class="kicker"><span>Recommendation</span></div>' +
-      '<div class="formula">' + esc(rec) + '</div><div class="meta">' +
-      r.metrics.sopVsPos.sopGates + ' gates for SOP versus ' + r.metrics.sopVsPos.posGates +
-      ' gates for POS. Don\'t care outputs are free to take either value.</div></div>';
+    el.solutionBlock.innerHTML = card('Minimal Sum of Products', r.sop, 'SOP', 'Active: ' + state.form) +
+      card('Minimal Product of Sums', r.pos, 'POS', '') +
+      '<div class="expr-card"><div class="kicker"><span>Gate Cost Comparison</span></div>' +
+      '<div class="formula">Preferred Two-Level Form: ' + esc(rec) + '</div><div class="meta">' +
+      r.metrics.sopVsPos.sopGates + ' gates (SOP) vs. ' + r.metrics.sopVsPos.posGates +
+      ' gates (POS). Don\'t-care cells are assigned only when they enlarge prime cubes.</div></div>';
   }
 
   function renderPrimes(r) {
@@ -263,7 +268,7 @@
     var essentialKeys = new Set(isPOS ? r.posEssentialPrimeImplicants.map(function (p) { return p.mask + ':' + p.value; })
       : r.essentialPrimeImplicants.map(function (p) { return p.mask + ':' + p.value; }));
     var cubes = chosenCubes(r);
-    var rows = allPrimes.map(function (p, i) {
+    var rows = allPrimes.map(function (p) {
       var key = p.mask + ':' + p.value;
       var essential = essentialKeys.has(key);
       var idx = cubes.findIndex(function (c) { return c.mask === p.mask && c.value === p.value; });
@@ -271,31 +276,60 @@
       var color = chosen ? groupColor(idx) : 'transparent';
       return '<div class="prime-row' + (essential ? ' is-essential' : '') + '">' +
         '<span class="dot" style="background:' + esc(color) + ';border:1px solid var(--border)"></span>' +
-        '<span class="term" title="' + esc(p.text) + '">' + esc(p.text) + (essential ? ' <span class="tag">essential</span>' : '') + '</span>' +
+        '<span class="term" title="' + esc(p.text) + '">' + esc(p.text) + (essential ? ' <span class="tag">[essential]</span>' : '') + '</span>' +
         '<span class="mins">' + p.minterms.map(function (m) { return 'm' + m; }).join(' ') + '</span></div>';
     });
     if (!rows.length) rows = ['<div class="prime-row"><span></span><span class="term">No prime implicants (constant function)</span><span></span></div>'];
     el.primeList.innerHTML = rows.join('');
   }
 
-  /* ---------------- Prime implicant grouping SVG ---------------- */
+  /* ---------------- Prime implicant grouping SVG (with toroidal wrap splitting) ---------------- */
+
+  function contiguousRuns(sortedIndices, maxCount) {
+    if (!sortedIndices.length) return [];
+    var runs = [];
+    var start = sortedIndices[0];
+    var prev = sortedIndices[0];
+    for (var k = 1; k < sortedIndices.length; k++) {
+      var v = sortedIndices[k];
+      if (v !== prev + 1) {
+        runs.push([start, prev]);
+        start = v;
+      }
+      prev = v;
+    }
+    runs.push([start, prev]);
+    if (maxCount === 4 && runs.length > 1 && runs[0][0] === 0 && runs[runs.length - 1][1] === 3) {
+      var head = runs[0];
+      var tail = runs[runs.length - 1];
+      runs = [[tail[0], 3], [0, head[1]]].concat(runs.slice(1, -1));
+    }
+    return runs;
+  }
+
+  function uniqueSorted(arr) {
+    var out = [];
+    arr.forEach(function (v) { if (out.indexOf(v) < 0) out.push(v); });
+    return out.sort(function (a, b) { return a - b; });
+  }
 
   function renderGroups(r) {
     var kmap = LG.karnaughMap(state.numVars, state.minterms, state.dontCares);
     var cubes = chosenCubes(r);
-    var cell = 62, gap = 4, padL = 62, padT = 42;
+    var cell = 58, gap = 2, padL = 58, padT = 38;
     var w = padL + kmap.cols * (cell + gap) + 20;
-    var h = padT + kmap.rows * (cell + gap) + 26;
+    var h = padT + kmap.rows * (cell + gap) + 22;
     var root = makeSvg(w, h, 'Prime implicant grouping diagram');
     var defs = svg('defs');
     if (state.showTexture) {
       var pat = svg('pattern', { id: 'lgHatch', width: 7, height: 7, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' });
-      pat.appendChild(svg('line', { x1: 0, y1: 0, x2: 0, y2: 7, stroke: cssVar('--surface-1'), 'stroke-width': 2.5, opacity: 0.55 }));
+      pat.appendChild(svg('line', { x1: 0, y1: 0, x2: 0, y2: 7, stroke: cssVar('--surface-1'), 'stroke-width': 2.2, opacity: 0.55 }));
       defs.appendChild(pat);
       root.appendChild(defs);
     }
+    root.appendChild(svg('text', { x: padL - 10, y: padT - 12, 'text-anchor': 'end', class: 'mono-label muted', 'font-size': 10 }, axisVarText(kmap)));
     for (var rr = 0; rr < kmap.rows; rr += 1) {
-      root.appendChild(svg('text', { x: 12, y: padT + rr * (cell + gap) + cell / 2 + 4, class: 'mono-label muted', 'font-size': 11 }, rowLabel(kmap, rr)));
+      root.appendChild(svg('text', { x: padL - 10, y: padT + rr * (cell + gap) + cell / 2 + 4, 'text-anchor': 'end', class: 'mono-label muted', 'font-size': 11 }, rowLabel(kmap, rr)));
     }
     for (var cc = 0; cc < kmap.cols; cc += 1) {
       root.appendChild(svg('text', { x: padL + cc * (cell + gap) + cell / 2, y: padT - 10, 'text-anchor': 'middle', class: 'mono-label muted', 'font-size': 11 }, colLabel(kmap, cc)));
@@ -305,10 +339,10 @@
         var cellData = kmap.cells[r2][c2];
         var x = padL + c2 * (cell + gap), y = padT + r2 * (cell + gap);
         var bg = cellData.value === 1 ? cssVar('--one') : cellData.value === 'X' ? cssVar('--dc') : cssVar('--zero');
-        root.appendChild(svg('rect', { x: x, y: y, width: cell, height: cell, rx: 7, fill: bg, stroke: cssVar('--border'), 'stroke-width': 1 }));
+        root.appendChild(svg('rect', { x: x, y: y, width: cell, height: cell, fill: bg, stroke: cssVar('--border'), 'stroke-width': 1 }));
         var ink = cellData.value === 1 ? cssVar('--one-ink') : cellData.value === 'X' ? cssVar('--dc-ink') : cssVar('--text-primary');
-        root.appendChild(svg('text', { x: x + cell / 2, y: y + cell / 2 + 6, 'text-anchor': 'middle', 'font-size': 19, 'font-weight': 600, fill: ink, class: 'mono-label' }, String(cellData.value)));
-        root.appendChild(svg('text', { x: x + 7, y: y + cell - 7, 'font-size': 9.5, fill: ink, opacity: 0.75, class: 'mono-label' }, 'm' + cellData.minterm));
+        root.appendChild(svg('text', { x: x + cell / 2, y: y + cell / 2 + 6, 'text-anchor': 'middle', 'font-size': 17, 'font-weight': 700, fill: ink, class: 'mono-label' }, String(cellData.value)));
+        root.appendChild(svg('text', { x: x + 5, y: y + cell - 5, 'font-size': 9, fill: ink, opacity: 0.78, class: 'mono-label' }, 'm' + cellData.minterm));
       }
     }
     cubes.forEach(function (cube, gi) {
@@ -320,33 +354,41 @@
         }
       });
       if (!coords.length) return;
-      var minR = Math.min.apply(null, coords.map(function (p) { return p.r; }));
-      var maxR = Math.max.apply(null, coords.map(function (p) { return p.r; }));
-      var minC = Math.min.apply(null, coords.map(function (p) { return p.c; }));
-      var maxC = Math.max.apply(null, coords.map(function (p) { return p.c; }));
-      var off = gi % 3;
-      var x0 = padL + minC * (cell + gap) - 3 + off * 2;
-      var y0 = padT + minR * (cell + gap) - 3 + off * 2;
-      var ww = (maxC - minC + 1) * (cell + gap) - gap + 6 - off * 4;
-      var hh = (maxR - minR + 1) * (cell + gap) - gap + 6 - off * 4;
-      var rect = svg('rect', {
-        x: x0, y: y0, width: ww, height: hh, rx: 9, fill: 'none',
-        stroke: color, 'stroke-width': 2.5, 'stroke-dasharray': gi % 2 ? '7 4' : 'none', opacity: 0.95
+      var rRuns = contiguousRuns(uniqueSorted(coords.map(function (p) { return p.r; })), kmap.rows);
+      var cRuns = contiguousRuns(uniqueSorted(coords.map(function (p) { return p.c; })), kmap.cols);
+      var off = (gi % 3) * 2;
+      var firstBox = null;
+      rRuns.forEach(function (rSeg) {
+        cRuns.forEach(function (cSeg) {
+          var minR = rSeg[0], maxR = rSeg[1];
+          var minC = cSeg[0], maxC = cSeg[1];
+          var x0 = padL + minC * (cell + gap) + 3 + off;
+          var y0 = padT + minR * (cell + gap) + 3 + off;
+          var ww = (maxC - minC + 1) * (cell + gap) - gap - 6 - off * 2;
+          var hh = (maxR - minR + 1) * (cell + gap) - gap - 6 - off * 2;
+          if (!firstBox) firstBox = { x: x0, y: y0 };
+          var rect = svg('rect', {
+            x: x0, y: y0, width: ww, height: hh, rx: 3, fill: 'none',
+            stroke: color, 'stroke-width': 2.4, 'stroke-dasharray': gi % 2 ? '6 3' : 'none'
+          });
+          svgTitle(rect, 'Group ' + (gi + 1) + ': ' + (state.form === 'POS' ? r.pos : r.sop).terms[gi] +
+            ' | minterms ' + cube.minterms.map(function (m) { return 'm' + m; }).join(', '));
+          root.appendChild(rect);
+          if (state.showTexture) {
+            root.appendChild(svg('rect', { x: x0, y: y0, width: ww, height: hh, rx: 3, fill: 'url(#lgHatch)', stroke: color, 'stroke-width': 1, opacity: 0.45 }));
+          }
+        });
       });
-      svgTitle(rect, 'Group ' + (gi + 1) + ': ' + (state.form === 'POS' ? r.pos : r.sop).terms[gi] +
-        ' | minterms ' + cube.minterms.map(function (m) { return 'm' + m; }).join(', '));
-      root.appendChild(rect);
-      if (state.showTexture) {
-        root.appendChild(svg('rect', { x: x0, y: y0, width: ww, height: hh, rx: 9, fill: 'url(#lgHatch)', stroke: color, 'stroke-width': 1, opacity: 0.45 }));
+      if (firstBox) {
+        var label = svg('g');
+        label.appendChild(svg('rect', { x: firstBox.x + 2, y: firstBox.y + 2, width: 16, height: 15, fill: color, stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
+        label.appendChild(svg('text', { x: firstBox.x + 10, y: firstBox.y + 13, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700, fill: '#ffffff' }, String(gi + 1)));
+        svgTitle(label, 'Group ' + (gi + 1) + ': ' + (state.form === 'POS' ? r.pos : r.sop).terms[gi]);
+        root.appendChild(label);
       }
-      var label = svg('g');
-      label.appendChild(svg('circle', { cx: x0 + 12, cy: y0 + 12, r: 9, fill: color, stroke: cssVar('--surface-1'), 'stroke-width': 2 }));
-      label.appendChild(svg('text', { x: x0 + 12, y: y0 + 15.5, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700, fill: '#ffffff' }, String(gi + 1)));
-      svgTitle(label, 'Group ' + (gi + 1) + ': ' + (state.form === 'POS' ? r.pos : r.sop).terms[gi]);
-      root.appendChild(label);
     });
     if (!cubes.length) {
-      root.appendChild(svg('text', { x: w / 2, y: h - 8, 'text-anchor': 'middle', class: 'muted', 'font-size': 11 }, 'constant function, no groups'));
+      root.appendChild(svg('text', { x: w / 2, y: h - 6, 'text-anchor': 'middle', class: 'muted', 'font-size': 11 }, 'constant function, no implicant groups'));
     }
     replace(el.groupSvg, root);
     renderGroupLegend(cubes, r);
@@ -364,12 +406,12 @@
   function renderGroupTable(cubes, r) {
     var sol = state.form === 'POS' ? r.pos : r.sop;
     var rows = cubes.map(function (cube, i) {
-      return '<tr><td><span class="group-cell"><i class="dot" style="width:10px;height:10px;border-radius:50%;background:' +
-        esc(groupColor(i)) + '"></i>' + (i + 1) + '</span></td><td>' + esc(sol.terms[i] || '') +
+      return '<tr><td><span class="group-cell"><i class="dot" style="width:9px;height:9px;background:' +
+        esc(groupColor(i)) + '"></i>G' + (i + 1) + '</span></td><td>' + esc(sol.terms[i] || '') +
         '</td><td>' + cube.literals + '</td><td>' + cube.minterms.map(function (m) { return 'm' + m; }).join(' ') + '</td></tr>';
     }).join('');
-    el.groupTable.innerHTML = '<table class="data"><thead><tr><th>Group</th><th>Term</th><th>Literals</th><th>Minterms</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="4">No groups</td></tr>') + '</tbody></table>';
+    el.groupTable.innerHTML = '<table class="data"><thead><tr><th>Group</th><th>Implicant</th><th>Literals</th><th>Covered Minterms</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="4">No groups (constant function)</td></tr>') + '</tbody></table>';
   }
 
   /* ---------------- Truth table ---------------- */
@@ -377,7 +419,7 @@
   function renderTruthTable(r) {
     var size = 1 << state.numVars;
     var dcSet = new Set(state.dontCares);
-    var head = '<thead><tr><th>#</th>' + state.vars.map(function (v) { return '<th>' + esc(v) + '</th>'; }).join('') +
+    var head = '<thead><tr><th>Dec</th>' + state.vars.map(function (v) { return '<th>' + esc(v) + '</th>'; }).join('') +
       '<th>F</th><th>SOP</th><th>POS</th></tr></thead>';
     var rows = [];
     for (var m = 0; m < size; m += 1) {
@@ -385,12 +427,12 @@
       var isDC = dcSet.has(m);
       var cls = isDC ? 'is-dc' : (r.truthTable[m] ? 'is-on' : '');
       var fCls = isDC ? 'out-dc' : (r.truthTable[m] ? 'out-on' : '');
-      rows.push('<tr class="' + cls + '"><td>' + m + '</td>' + bits.map(function (b) { return '<td>' + b + '</td>'; }).join('') +
+      rows.push('<tr class="' + cls + '"><td>m' + m + '</td>' + bits.map(function (b) { return '<td>' + b + '</td>'; }).join('') +
         '<td class="' + fCls + '">' + (isDC ? 'X' : r.truthTable[m]) + '</td>' +
         '<td>' + r.verification.sopOutputs[m] + '</td><td>' + r.verification.posOutputs[m] + '</td></tr>');
     }
     el.truthTable.innerHTML = '<table class="data">' + head + '<tbody>' + rows.join('') + '</tbody></table>';
-    el.ttToggle.textContent = state.highlight ? 'Highlight on rows' : 'Plain rows';
+    el.ttToggle.textContent = state.highlight ? 'Highlight active rows' : 'Plain table rows';
     el.ttToggle.setAttribute('aria-pressed', String(state.highlight));
     el.truthTable.querySelector('table').classList.toggle('no-highlight', !state.highlight);
   }
@@ -413,16 +455,15 @@
     });
     var invList = Array.from(inv).sort(function (a, b) { return a - b; });
     var lanes = inputs.length + invList.length;
-    var top = 46, laneH = 26, gateY = top + lanes * laneH + 12;
-    var railX = 34, gateX = 190, outerX = 430, outX = 560;
-    var laneBottom = gateY - 6;
-    var h = gateY + Math.max(cubes.length, 2) * 48 + 52;
-    var w = outX + 90;
+    var top = 42, laneH = 24, gateY = top + lanes * laneH + 10;
+    var railX = 34, gateX = 186, outerX = 420, outX = 548;
+    var h = gateY + Math.max(cubes.length, 2) * 44 + 48;
+    var w = outX + 76;
     var root = makeSvg(w, h, 'Gate level schematic of ' + state.form + ' implementation');
 
-    root.appendChild(svg('text', { x: 16, y: 20, 'font-size': 12, class: 'secondary', 'font-weight': 600 },
-      (isPOS ? 'OR gates feeding one AND' : 'AND gates feeding one OR') + ', ' + cubeDescription(cubes.length) +
-      (cubes.length > MAX_GROUPS ? ' (first ' + MAX_GROUPS + ' drawn)' : '')));
+    root.appendChild(svg('text', { x: 12, y: 18, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
+      (isPOS ? 'Two-Level OR-AND Network' : 'Two-Level AND-OR Network') + ' (' + cubeDescription(cubes.length) + ')' +
+      (cubes.length > MAX_GROUPS ? ' [first ' + MAX_GROUPS + ' shown]' : '')));
     cubes = cubes.slice(0, MAX_GROUPS);
 
     var laneIndex = 0;
@@ -430,25 +471,24 @@
     inputs.forEach(function (name, i) {
       var y = top + laneIndex * laneH;
       laneY['p' + i] = y;
-      root.appendChild(svg('text', { x: 8, y: y + 4, 'font-size': 11.5, class: 'mono-label', 'font-weight': 600 }, name));
-      root.appendChild(svg('line', { x1: railX, y1: y, x2: gateX + 26, y2: y, stroke: cssVar('--border'), 'stroke-width': 1.5 }));
-      root.appendChild(svg('circle', { cx: railX, cy: y, r: 2.6, fill: cssVar('--accent') }));
+      root.appendChild(svg('text', { x: 8, y: y + 4, 'font-size': 11, class: 'mono-label', 'font-weight': 700 }, name));
+      root.appendChild(svg('line', { x1: railX, y1: y, x2: gateX + 24, y2: y, stroke: cssVar('--border'), 'stroke-width': 1.4 }));
+      root.appendChild(svg('rect', { x: railX - 2, y: y - 2, width: 4, height: 4, fill: cssVar('--accent') }));
       laneIndex += 1;
     });
     invList.forEach(function (i) {
       var y = top + laneIndex * laneH;
       laneY['n' + i] = y;
-      root.appendChild(svg('rect', { x: railX + 82, y: y - 9, width: 34, height: 18, rx: 4, fill: cssVar('--surface-2'), stroke: cssVar('--border'), 'stroke-width': 1.4 }));
-      root.appendChild(svg('text', { x: railX + 99, y: y + 4, 'font-size': 10, 'text-anchor': 'middle', class: 'mono-label secondary' }, 'NOT'));
-      root.appendChild(svg('circle', { cx: railX + 120, cy: y, r: 3, fill: cssVar('--surface-2'), stroke: cssVar('--border') }));
-      root.appendChild(svg('line', { x1: railX + 123, y1: y, x2: gateX + 26, y2: y, stroke: cssVar('--border'), 'stroke-width': 1.5 }));
+      root.appendChild(svg('rect', { x: railX + 80, y: y - 8, width: 34, height: 16, fill: cssVar('--surface-1'), stroke: cssVar('--border-strong'), 'stroke-width': 1.2 }));
+      root.appendChild(svg('text', { x: railX + 97, y: y + 3.5, 'font-size': 9.5, 'text-anchor': 'middle', class: 'mono-label secondary' }, 'INV'));
+      root.appendChild(svg('circle', { cx: railX + 118, cy: y, r: 2.6, fill: cssVar('--surface-1'), stroke: cssVar('--border-strong') }));
+      root.appendChild(svg('line', { x1: railX + 121, y1: y, x2: gateX + 24, y2: y, stroke: cssVar('--border'), 'stroke-width': 1.4 }));
       var fromY = laneY['p' + i];
-      root.appendChild(svg('path', { d: 'M ' + (railX + 56) + ' ' + fromY + ' V ' + (y - 9) + ' H ' + (railX + 82), fill: 'none', stroke: cssVar('--border'), 'stroke-width': 1.2, opacity: 0.8 }));
-      root.appendChild(svg('text', { x: 8, y: y + 4, 'font-size': 11, class: 'mono-label muted' }, '~' + state.vars[i]));
+      root.appendChild(svg('path', { d: 'M ' + (railX + 54) + ' ' + fromY + ' V ' + (y - 8) + ' H ' + (railX + 80), fill: 'none', stroke: cssVar('--border'), 'stroke-width': 1.2 }));
+      root.appendChild(svg('text', { x: 8, y: y + 4, 'font-size': 10.5, class: 'mono-label muted' }, '~' + state.vars[i]));
       laneIndex += 1;
     });
-    /* Drop lines from rails to each product gate. */
-    var gateH = 34, gateGap = 14;
+    var gateH = 30, gateGap = 13;
     var gateBlockH = Math.max(cubes.length, 1) * (gateH + gateGap);
     var firstGateY = gateY;
     cubes.forEach(function (cube, gi) {
@@ -462,36 +502,36 @@
         lits.push({ i: i, neg: (isPOS ? positive : !positive) });
       });
       var gx = gateX;
-      var gw = 96;
-      root.appendChild(svg('rect', { x: gx, y: gy, width: gw, height: gateH, rx: 7, fill: cssVar('--surface-2'), stroke: color, 'stroke-width': 2 }));
-      root.appendChild(svg('text', { x: gx + gw / 2, y: gy + gateH / 2 + 4, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, class: 'mono-label' },
-        (isPOS ? 'OR' : 'AND') + ' ' + (gi + 1)));
+      var gw = 92;
+      root.appendChild(svg('rect', { x: gx, y: gy, width: gw, height: gateH, fill: cssVar('--surface-1'), stroke: color, 'stroke-width': 1.8 }));
+      root.appendChild(svg('text', { x: gx + gw / 2, y: gy + gateH / 2 + 4, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 700, class: 'mono-label' },
+        (isPOS ? 'OR_' : 'AND_') + (gi + 1)));
       lits.forEach(function (lit, li) {
         var key = (lit.neg ? 'n' : 'p') + lit.i;
         var sy = laneY[key];
         if (sy == null) sy = laneY['p' + lit.i];
-        var ex = gx + 18 + li * Math.min(16, (gw - 36) / Math.max(lits.length, 1));
-        root.appendChild(svg('path', { d: 'M ' + ex + ' ' + sy + ' V ' + (gy - 2) + ' H ' + ex + ' V ' + gy, fill: 'none', stroke: color, 'stroke-width': 1.4, opacity: 0.85 }));
-        root.appendChild(svg('circle', { cx: ex, cy: sy, r: 2.3, fill: color }));
+        var ex = gx + 16 + li * Math.min(16, (gw - 32) / Math.max(lits.length, 1));
+        root.appendChild(svg('path', { d: 'M ' + ex + ' ' + sy + ' V ' + gy, fill: 'none', stroke: color, 'stroke-width': 1.3 }));
+        root.appendChild(svg('circle', { cx: ex, cy: sy, r: 2.2, fill: color }));
       });
-      root.appendChild(svg('path', { d: 'M ' + (gx + gw) + ' ' + (gy + gateH / 2) + ' H ' + (outerX - 24) + ' V ' + (firstGateY + gateBlockH / 2), fill: 'none', stroke: cssVar('--border'), 'stroke-width': 1.6 }));
-      root.appendChild(svg('text', { x: gateX - 12, y: gy + gateH / 2 + 4, 'text-anchor': 'end', 'font-size': 10, class: 'mono-label muted' }, sol.terms[gi] || ''));
+      root.appendChild(svg('path', { d: 'M ' + (gx + gw) + ' ' + (gy + gateH / 2) + ' H ' + (outerX - 22) + ' V ' + (firstGateY + gateBlockH / 2), fill: 'none', stroke: cssVar('--border-strong'), 'stroke-width': 1.4 }));
+      root.appendChild(svg('text', { x: gateX - 10, y: gy + gateH / 2 + 4, 'text-anchor': 'end', 'font-size': 10, class: 'mono-label muted' }, sol.terms[gi] || ''));
     });
     if (!cubes.length) {
-      root.appendChild(svg('text', { x: gateX, y: gateY + 20, 'font-size': 12, class: 'muted' }, 'Constant ' + sol.expression + ', no gates required'));
+      root.appendChild(svg('text', { x: gateX, y: gateY + 20, 'font-size': 11.5, class: 'muted' }, 'Constant ' + sol.expression + ' (0 logic gates)'));
     } else {
-      var oy = firstGateY + gateBlockH / 2 - 22;
-      root.appendChild(svg('rect', { x: outerX - 24, y: oy, width: 100, height: 44, rx: 8, fill: cssVar('--surface-2'), stroke: cssVar('--accent'), 'stroke-width': 2 }));
-      root.appendChild(svg('text', { x: outerX + 26, y: oy + 27, 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 700, class: 'mono-label' }, isPOS ? 'AND' : 'OR'));
-      root.appendChild(svg('path', { d: 'M ' + (outerX + 76) + ' ' + (oy + 22) + ' H ' + outX, fill: 'none', stroke: cssVar('--accent'), 'stroke-width': 2 }));
-      root.appendChild(svg('text', { x: outX + 8, y: oy + 26, 'font-size': 12, 'font-weight': 700, class: 'mono-label' }, 'F'));
+      var oy = firstGateY + gateBlockH / 2 - 20;
+      root.appendChild(svg('rect', { x: outerX - 22, y: oy, width: 94, height: 40, fill: cssVar('--surface-1'), stroke: cssVar('--accent'), 'stroke-width': 2 }));
+      root.appendChild(svg('text', { x: outerX + 25, y: oy + 24, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 700, class: 'mono-label' }, isPOS ? 'AND_OUT' : 'OR_OUT'));
+      root.appendChild(svg('path', { d: 'M ' + (outerX + 72) + ' ' + (oy + 20) + ' H ' + outX, fill: 'none', stroke: cssVar('--accent'), 'stroke-width': 2 }));
+      root.appendChild(svg('text', { x: outX + 6, y: oy + 24, 'font-size': 11.5, 'font-weight': 700, class: 'mono-label' }, 'F'));
     }
-    root.appendChild(svg('text', { x: 16, y: h - 12, 'font-size': 10.5, class: 'muted' },
-      'Worst case path ' + sol.propagationDelay.levels + ' gate levels, about ' + sol.propagationDelay.estimate + ' ns.'));
+    root.appendChild(svg('text', { x: 12, y: h - 10, 'font-size': 10, class: 'muted' },
+      'Propagation path: ' + sol.propagationDelay.levels + ' gate levels (' + sol.propagationDelay.estimate + ' ns nominal).'));
     replace(el.schematicSvg, root);
   }
 
-  function cubeDescription(n) { return n + (n === 1 ? ' cube' : ' cubes'); }
+  function cubeDescription(n) { return n + (n === 1 ? ' prime cube' : ' prime cubes'); }
 
   /* ---------------- Timing waveform SVG ---------------- */
 
@@ -521,24 +561,24 @@
     var stride = Math.max(1, Math.ceil(size / cols));
     var indices = [];
     for (var m = 0; m < size; m += stride) indices.push(m);
-    var step = Math.max(11, Math.min(24, 520 / indices.length));
-    var labelW = 96, x0 = labelW + 10, rowH = 34, top = 34;
-    var h = top + shown.length * rowH + 32;
-    var w = x0 + indices.length * step + 30;
+    var step = Math.max(12, Math.min(26, 480 / indices.length));
+    var labelW = 90, x0 = labelW + 10, rowH = 30, top = 32;
+    var h = top + shown.length * rowH + 26;
+    var w = x0 + indices.length * step + 26;
     var root = makeSvg(w, h, 'Timing waveform for all input combinations');
-    root.appendChild(svg('text', { x: 12, y: 19, 'font-size': 11.5, class: 'secondary', 'font-weight': 600 },
-      'Combinational waveform, ' + indices.length + ' of ' + size + ' vectors shown'));
+    root.appendChild(svg('text', { x: 10, y: 17, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
+      'HP Logic State Analyzer Trace (' + indices.length + ' of ' + size + ' vectors)'));
     indices.forEach(function (idx, ci) {
-      root.appendChild(svg('text', { x: x0 + ci * step + step / 2, y: top - 8, 'text-anchor': 'middle', 'font-size': 9, class: 'mono-label muted' }, String(idx)));
+      var vx = x0 + ci * step;
+      root.appendChild(svg('line', { x1: vx, y1: top - 4, x2: vx, y2: h - 18, stroke: cssVar('--border-soft'), 'stroke-width': 1 }));
+      root.appendChild(svg('text', { x: vx + step / 2, y: top - 7, 'text-anchor': 'middle', 'font-size': 9, class: 'mono-label muted' }, String(idx)));
     });
     shown.forEach(function (sig, si) {
-      var baseY = top + si * rowH + rowH - 8;
-      var highY = baseY - 16;
-      root.appendChild(svg('text', { x: 10, y: baseY - 4, 'font-size': 10.5, class: 'mono-label secondary' }, sig.name));
-      root.appendChild(svg('line', { x1: x0, y1: highY, x2: w - 20, y2: highY, stroke: cssVar('--border-soft'), 'stroke-width': 1, 'stroke-dasharray': '2 4' }));
-      root.appendChild(svg('line', { x1: x0, y1: baseY, x2: w - 20, y2: baseY, stroke: cssVar('--border-soft'), 'stroke-width': 1, 'stroke-dasharray': '2 4' }));
+      var baseY = top + si * rowH + rowH - 7;
+      var highY = baseY - 14;
+      root.appendChild(svg('text', { x: 8, y: baseY - 3, 'font-size': 10.5, class: 'mono-label secondary' }, sig.name));
+      root.appendChild(svg('line', { x1: x0, y1: baseY, x2: w - 16, y2: baseY, stroke: cssVar('--border-soft'), 'stroke-width': 1, 'stroke-dasharray': '2 3' }));
       var prev = sig.values[indices[0]];
-      var segStart = 0;
       var path = [];
       function yFor(v) { return v === 'X' ? (baseY + highY) / 2 : (v ? highY : baseY); }
       path.push('M ' + x0 + ' ' + yFor(prev));
@@ -550,12 +590,10 @@
           path.push('V ' + yFor(v));
           drawMarker(root, x, yFor(prev), prev, sig.color);
           prev = v;
-          segStart = ci;
         }
-        void segStart;
       }
-      path.push('H ' + (x0 + (indices.length - 1) * step));
-      root.appendChild(svg('path', { d: path.join(' '), fill: 'none', stroke: sig.color, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+      path.push('H ' + (x0 + indices.length * step));
+      root.appendChild(svg('path', { d: path.join(' '), fill: 'none', stroke: sig.color, 'stroke-width': 1.9, 'stroke-linejoin': 'round' }));
       var lastV = sig.values[indices[indices.length - 1]];
       drawMarker(root, x0 + (indices.length - 1) * step, yFor(lastV), lastV, sig.color);
     });
@@ -564,9 +602,9 @@
 
   function drawMarker(root, x, y, value, color) {
     if (value === 'X') {
-      root.appendChild(svg('rect', { x: x - 4, y: y - 4, width: 8, height: 8, fill: cssVar('--dc'), stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
+      root.appendChild(svg('rect', { x: x - 3.5, y: y - 3.5, width: 7, height: 7, fill: cssVar('--dc'), stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
     } else {
-      root.appendChild(svg('circle', { cx: x, cy: y, r: 2.6, fill: color, stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
+      root.appendChild(svg('circle', { cx: x, cy: y, r: 2.3, fill: color, stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
     }
   }
 
@@ -577,7 +615,7 @@
     el.tbFilename.textContent = v.testbenchFilename;
     el.moduleCode.textContent = v.module;
     el.tbCode.textContent = v.testbench;
-    setStatus(el.exportStatus, v.vectorCount + ' test vectors. Compile with iverilog -g2001 -o sim.vvp ' +
+    setStatus(el.exportStatus, v.vectorCount + ' testbench vectors generated. Verify with: iverilog -g2001 -o sim.vvp ' +
       v.filename + ' ' + v.testbenchFilename + ' && vvp sim.vvp', '');
   }
 
@@ -635,7 +673,7 @@
       state.preset = '';
       syncInputs();
       recompute();
-      setStatus(el.exprStatus, 'Applied ' + tt.minterms.length + ' minterms from: ' + src, 'ok');
+      setStatus(el.exprStatus, 'Evaluated ' + tt.minterms.length + ' on-set minterms from: ' + src, 'ok');
     } catch (err) {
       setStatus(el.exprStatus, err.message, 'error');
     }
@@ -653,7 +691,6 @@
     var minterms = p.minterms.slice();
     var note = 'Loaded ' + p.label + '.';
     if (p.numVars > 4) {
-      /* Show a four variable projection of C4 with the low carry chain held high. */
       state.numVars = 4;
       state.vars = ['A3', 'B3', 'A2', 'B2'];
       var table = LG.presetTruthTable(id);
@@ -663,7 +700,7 @@
           (((m >> 1) & 1) << 3) | ((m & 1) << 2);
         if (table[vector]) minterms.push(m);
       }
-      note = 'Loaded ' + p.label + '. Karnaugh map shows four upper bits with the low chain high; simulate the netlist for all 512 vectors.';
+      note = 'Loaded ' + p.label + '. Karnaugh map shows four upper bits with low carry chain high; run netlist sweep for 512 vectors.';
     }
     if (!minterms.length && p.expr) {
       minterms = LG.evalTruthTable(p.expr, state.vars).minterms;
@@ -691,7 +728,7 @@
       setStatus(el.netlistStatus, 'Simulated ' + count + ' vectors. Outputs: ' + outputs + '. Hazards: ' +
         state.netlistResult.hazards.length + '.', 'ok');
       renderWaveform(state.result);
-      toast('Netlist simulated');
+      toast('Netlist sweep completed');
     } catch (err) {
       setStatus(el.netlistStatus, err.message, 'error');
     }
@@ -720,7 +757,7 @@
     el.clearAll.addEventListener('click', function () {
       state.minterms = []; state.dontCares = []; state.preset = ''; state.netlistResult = null;
       el.exprInput.value = ''; syncInputs(); recompute();
-      setStatus(el.exprStatus, 'Cleared. Click cells to build a function.', '');
+      setStatus(el.exprStatus, 'Cleared. Click Karnaugh map cells to specify a function.', '');
     });
     el.varCount.addEventListener('change', changeVarCount);
     el.varNames.addEventListener('change', function () {
@@ -750,7 +787,7 @@
     el.themeToggle.addEventListener('click', function () {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
       document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
-      el.themeToggle.textContent = dark ? 'Dark theme' : 'Light theme';
+      el.themeToggle.textContent = dark ? 'HP Analyzer CRT' : 'IEEE Paper Datasheet';
       el.themeToggle.setAttribute('aria-pressed', String(!dark));
       renderAll();
     });
@@ -775,7 +812,7 @@
     bind();
     syncInputs();
     recompute();
-    setStatus(el.exprStatus, 'Ready. Click Karnaugh map cells or enter an expression.', 'ok');
+    setStatus(el.exprStatus, 'Ready. Click Karnaugh map cells or enter a Boolean equation.', 'ok');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

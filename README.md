@@ -1,191 +1,120 @@
 # LogicGate
 
-An offline digital logic workbench. LogicGate parses Boolean expressions, builds truth tables, minimizes functions with Quine-McCluskey and Petrick's exact minimum cover, draws Karnaugh maps and prime implicant groups, simulates gate level netlists with D flip flops, and exports synthesizable Verilog-2001 modules with self checking testbenches.
+An offline digital logic synthesis and timing analyzer datasheet bench. LogicGate parses Boolean equations, constructs truth tables, computes exact two-level Sum of Products (SOP) and Product of Sums (POS) realizations via Quine-McCluskey and Petrick's method, renders Gray-coded Karnaugh maps with toroidal prime-cube overlays, simulates gate-level DAG and clocked D-register netlists, and exports synthesizable IEEE 1364-2001 Verilog modules with self-checking testbenches.
 
-The repository has zero runtime dependencies and makes zero network requests. Open `index.html` directly from disk, or serve the folder with any static server. The engine is a UMD module: `require('./logic.js')`, AMD `define`, or the browser global `window.LogicGate`.
+The repository has zero runtime dependencies and makes zero network requests. Open `index.html` directly from disk (`file://`) or serve the directory from any static host. The computation engine is a standalone UMD module (`require('./logic.js')` in Node.js or `window.LogicGate` in the browser).
 
-Live site: https://draarivpatel-ui.github.io/logicgate/
+**Live bench:** https://draarivpatel-ui.github.io/logicgate/
 
-## Contents
+---
+
+## Repository Contents
 
 | File | Purpose |
 | --- | --- |
-| `logic.js` | UMD engine. Parser, minimizer, Karnaugh maps, netlist simulator, presets, Verilog exporter. |
-| `index.html` | Workbench markup. |
-| `style.css` | Selected dark and light themes, responsive layout, print stylesheet. |
-| `app.js` | Browser controller. Karnaugh map, grouping diagram, schematic, waveform, truth table, exports. |
-| `test.js` | 52 `node:test` cases. |
-| `.nojekyll` | Static GitHub Pages marker. |
-| `LICENSE` | MIT license. |
+| `logic.js` | UMD synthesis and simulation kernel: recursive-descent parser, Quine-McCluskey, Petrick exact cover, Gray-code Karnaugh map, DAG/DFF netlist simulator, Verilog-2001 exporter |
+| `index.html` | IEEE Digital Logic & Hewlett-Packard state analyzer datasheet markup |
+| `style.css` | IEEE datasheet paper (light) and HP 16500B CRT logic analyzer (dark) themes, print stylesheet |
+| `app.js` | Browser controller: interactive Karnaugh map, toroidal wrap cube splitter, gate schematic, analyzer waveform, truth table, Verilog export |
+| `test.js` | 52 `node:test` assertions including brute-force optimality oracles across 2, 3, and 4 variables |
+| `.nojekyll` | Static GitHub Pages marker |
+| `LICENSE` | MIT |
 
-## Quick start
+---
+
+## Quick Start & Hardware Verification
+
+Run the 52-test Node.js verification suite and syntax checks:
 
 ```sh
 node --test test.js
 node --check logic.js
 node --check app.js
-iverilog -g2001 -o sim.vvp majority3.v majority3_tb.v
-vvp sim.vvp
 ```
 
-For the browser, no build step is needed:
+Export a Verilog-2001 module and self-checking testbench from the command line and verify with Icarus Verilog (`iverilog`):
 
 ```sh
-open index.html          # macOS
-xdg-open index.html      # Linux
-python3 -m http.server 8000
-```
-
-The last command serves the folder at `http://localhost:8000/` if you prefer a local static server. The application itself never fetches anything.
-
-## Expression syntax
-
-Variables are single letters `A` through `P` by default, or any explicit names you pass. Matching is case insensitive against explicit names. Adjacent single letter variables imply AND, so `AB` means `A & B`.
-
-| Operator | Accepted forms |
-| --- | --- |
-| NOT | `!A`, `~A`, `NOT A`, postfix `A'` |
-| AND | `A & B`, `A && B`, `A * B`, `A AND B`, adjacency `AB` |
-| OR | `A | B`, `A || B`, `A + B`, `A OR B` |
-| XOR | `A ^ B`, `A XOR B` |
-| NAND | `A ~& B`, `A NAND B` |
-| NOR | `A ~| B`, `A NOR B` |
-| XNOR | `A ~^ B`, `A XNOR B` |
-| Constants | `0`, `1`, `TRUE`, `FALSE` |
-| Groups | parentheses |
-| Comments | `//` to end of line, or `/* ... */` |
-
-Precedence from tightest to loosest: NOT, AND, XOR, OR. Postfix `A'` binds before any binary operator. Examples: `A & B | !C`, `AB' + C`, `!(A + B)`, `A ^ B ^ C`, `NAND(A, B)` is not used; write `A NAND B` instead.
-
-## Quine-McCluskey walkthrough
-
-The goal is a minimum two level implementation of a Boolean function. LogicGate computes both sum of products (SOP, an OR of AND terms) and product of sums (POS, an AND of OR terms), with don't cares used opportunistically.
-
-Worked example: a three input majority voter, `F(A, B, C) = 1` for minterms 3, 5, 6, 7.
-
-1. **List the on set.** Write each minterm as a binary string with `A` most significant: `3 = 011`, `5 = 101`, `6 = 110`, `7 = 111`. Add don't care minterms to this list if the function has any. They may be covered, but they never have to be.
-2. **Group by popcount.** Count the ones: group 1 holds `011`, `101`, `110`; group 2 holds `111`.
-3. **Combine adjacent groups.** Two implicants combine when they differ in exactly one bit. Mark that bit as a dash. `011` and `111` give `-11`; `101` and `111` give `1-1`; `110` and `111` give `11-`. All three original minterms are used, so none survive alone. Repeat combining: `-11`, `1-1`, and `11-` differ in two positions, so no further reduction is possible.
-4. **Collect prime implicants.** The maximal implicants are `-11` (`BC`, covering 3 and 7), `1-1` (`AC`, covering 5 and 7), and `11-` (`AB`, covering 6 and 7). A dash means the variable is absent; a `0` bit means the variable appears complemented in SOP.
-5. **Build the prime implicant chart.** Rows are primes, columns are required on minterms 3, 5, 6, 7. Each of 3, 5, and 6 is covered by exactly one prime, so all three primes are essential. There are no uncovered required minterms left, so the cover is already minimal.
-6. **Solve the remaining cover.** When essential primes leave columns uncovered, LogicGate selects the fewest additional implicants that cover them. Petrick's method forms a product of sums, one sum per uncovered minterm listing the primes that cover it, then expands to a sum of products and keeps the smallest product. This implementation uses branch and bound over the same condition: separate the most constrained uncovered minterm, try each covering prime, prune any branch that cannot beat the best known solution, and prefer fewer terms then fewer literals. This is exact, not a greedy heuristic.
-7. **Verify.** Evaluate both solutions against every care input. Don't care inputs are free to take either value and are reported in `verification.dontCareAssignments`.
-
-Result for the voter: `BC + AC + AB`. LogicGate also minimizes the dual function (the zeros, plus don't cares) to produce the POS form `(A + B)(A + C)(B + C)`. Both are minimum for their form.
-
-The engine reports prime implicants, essential primes, literal counts, gate counts, a two level gate delay estimate at 2 ns per level, and full verification arrays. Karnaugh maps for 2, 3, and 4 variables use Gray coded row and column order, so adjacent cells always differ by one bit and prime implicants appear as rectangles that wrap around the edges.
-
-## Node API
-
-```js
-const LG = require('./logic.js');
-
-// Truth table from an expression.
-const tt = LG.evalTruthTable('A & B | !C', ['A', 'B', 'C']);
-console.log(tt.minterms);            // [0, 2, 4, 6, 7]
-console.log(tt.outputs);            // one entry per input combination
-
-// Minimize a function with don't cares.
-const r = LG.minimizeBoolean(4, [0, 2, 3, 5, 6, 7, 8, 9], [10, 11, 12, 13, 14, 15], {
-  vars: ['A', 'B', 'C', 'D']
-});
-console.log(r.sop.expression);
-console.log(r.pos.expression);
-console.log(r.primeImplicants.map(p => p.text));
-console.log(r.essentialPrimeImplicants.map(p => p.text));
-console.log(r.verification.sopMatchesCareInputs);   // true
-
-// Karnaugh map layout.
-const k = LG.karnaughMap(3, [3, 5, 6, 7], []);
-console.log(k.grayOrder, k.cells);
-
-// Prime implicants alone, and the exact cover alias.
-console.log(LG.primeImplicants(3, [3, 5, 6, 7]));
-console.log(LG.solvePetrick(3, [3, 5, 6, 7]).sop.expression);
-
-// Verilog module and self checking testbench.
-const v = LG.exportVerilog({
-  numVars: 3, vars: ['A', 'B', 'C'], minterms: [3, 5, 6, 7],
-  dontCares: [], form: 'SOP', moduleName: 'majority3', outputName: 'vote'
-});
-console.log(v.filename, v.testbenchFilename, v.vectorCount);
-console.log(v.module);
-console.log(v.testbench);
-```
-
-`exportVerilog` also accepts `expr` in place of `minterms`, generates a `timescale` directive and `default_nettype none`, sanitizes identifiers, emits constants correctly in both forms, and writes a testbench that checks every care vector, prints `DONT CARE` for don't care vectors, reports `ALL N VECTORS PASS`, and dumps a VCD file.
-
-### Netlist simulation
-
-A netlist declares external `inputs`, gate `nodes`, and `edges` that wire an output port to an input port. `IN:<name>` and a bare input name both refer to an external input. Gate types are `AND`, `OR`, `NOT`, `XOR`, `NAND`, `NOR`, `XNOR`, `BUF`, `MUX2`, `HALF_ADDER`, `FULL_ADDER`, `DFF`, and `CONST`.
-
-```js
-const netlist = {
-  inputs: ['A', 'B', 'CIN'],
-  outputs: [
-    { node: 'fa', port: 'sum', name: 's' },
-    { node: 'fa', port: 'carry', name: 'cout' }
-  ],
-  nodes: [{ id: 'fa', type: 'FULL_ADDER' }],
-  edges: [
-    { from: 'IN:A', to: 'fa', toPort: 0 },
-    { from: 'B', to: 'fa', toPort: 1 },
-    { from: 'IN:CIN', to: 'fa', toPort: 2 }
-  ]
-};
-const sim = LG.simulateNetlist(netlist, [0, 1, 2, 3, 4, 5, 6, 7]);
-console.log(sim.cycles.map(c => c.outputs));   // eight s and cout pairs
-console.log(sim.waveform.signals);             // per signal value history
-console.log(LG.detectCycles(netlist));         // cycle and sequential report
-```
-
-Combinational logic is evaluated in topological order each vector. A combinational cycle throws a `LogicError`. `DFF` nodes are sequential: their `D` input is sampled from the settled values of the current vector and their `q` state updates non blocking at the vector boundary, so feedback through a DFF is legal. `init` sets the starting state. The simulator also reports input hazards and captures a waveform.
-
-### Presets
-
-`LG.listPresets()` returns ids and descriptions. `LG.getPreset(id)` returns a full preset, and `LG.presetTruthTable(id)` returns its output vector. Built in presets are a seven segment decoder segment, a four bit ALU slice with a netlist, a four bit carry lookahead carry chain with a netlist, a majority voter, and a Gray code converter.
-
-## CLI examples
-
-All examples run from the repository folder. The engine has no executable wrapper, so the CLI is plain Node with `node -e` or a small script.
-
-```sh
-# Print a minimized expression.
-node -e "const L=require('./logic.js'); console.log(L.minimizeBoolean(3,[3,5,6,7]).sop.expression)"
-
-# Evaluate an expression and list its minterms.
-node -e "const L=require('./logic.js'); console.log(L.evalTruthTable('A ^ B ^ C',['A','B','C']).minterms.join(','))"
-
-# Show the Karnaugh map grid for a BCD segment.
-node -e "const L=require('./logic.js'); console.table(L.karnaughMap(4,[0,2,3,5,6,7,8,9],[10,11,12,13,14,15]).cells)"
-
-# Write a Verilog module and testbench, then simulate them.
 node -e "const fs=require('fs'),L=require('./logic.js'); const v=L.exportVerilog({numVars:3,minterms:[3,5,6,7],form:'SOP',moduleName:'majority3',outputName:'vote'}); fs.writeFileSync(v.filename,v.module); fs.writeFileSync(v.testbenchFilename,v.testbench)"
 iverilog -g2001 -o sim.vvp majority3.v majority3_tb.v
 vvp sim.vvp
-
-# Simulate a built in preset netlist over every input vector.
-node -e "const L=require('./logic.js'); const p=L.getPreset('carryLookahead4Bit'); console.log(L.simulateNetlist(p.netlist,[...Array(512).keys()]).outputs)"
-
-# Run the full test suite.
-node --test test.js
 ```
 
-Expected output for the first command is `BC + AC + AB`. Expected final line from the testbench simulation is `ALL 8 VECTORS PASS`.
+Output:
 
-## Workbench
+```
+VCD info: dumpfile majority3.vcd opened for output.
+ALL 8 VECTORS PASS
+```
 
-Opening `index.html` gives you a Karnaugh map for 2, 3, or 4 variables. Click any cell to cycle `0` to `1` to `X` (don't care) to `0`. You can also type minterm lists, don't care lists, custom variable names, or a Boolean expression, or load a preset. Every change recomputes the solution, primes, grouping diagram, truth table, gate level schematic, timing waveform, stat tiles, and Verilog files.
+---
 
-The grouping diagram, schematic, and waveform are inline SVGs with hover tooltips and table views. A legend maps each group number to its color and term. The truth table toggle switches between highlighted rows and plain rows. The theme toggle switches between selected dark and light palettes, and an optional pattern fill adds texture for color vision deficiency or print. Copy or download the module and testbench with one click.
+## Boolean Expression Grammar
 
-## Verification
+Variables default to `A` through `P` or any explicit port identifier list passed to the engine. Adjacency between single-letter variables (`AB`) compiles to implicit `AND`.
 
-- `node --test test.js`: 52 tests, all pass. Coverage includes parsing, truth table equivalence, exhaustive 2 and 3 variable optimality against a brute force oracle, sampled 4 variable optimality with don't cares, netlist simulation and cycle detection, presets, and Verilog syntax.
-- Generated Verilog was compiled with `iverilog -g2001` and simulated with `vvp` for SOP, POS, constant zero, constant one, don't care, and expression derived cases. Every case printed `ALL N VECTORS PASS`.
-- `node --check` passes on all three JavaScript files.
-- Palette validation passed for both themes. The light theme contrast warning is relieved by direct labels, legends, and table views.
-- No network requests, no external fonts, no CDN scripts, and no runtime dependencies.
+| Operation | Accepted Syntax |
+| --- | --- |
+| Complement (NOT) | `!A`, `~A`, `NOT A`, postfix `A'` |
+| Product (AND) | `A & B`, `A && B`, `A * B`, `A AND B`, implicit `AB` |
+| Exclusive-OR (XOR) | `A ^ B`, `A XOR B` |
+| Sum (OR) | `A | B`, `A || B`, `A + B`, `A OR B` |
+| Derived Gates | `A ~& B` (`NAND`), `A ~| B` (`NOR`), `A ~^ B` (`XNOR`) |
+| Constants & Comments | `0`, `1`, `TRUE`, `FALSE`, line `// ...`, block `/* ... */` |
+
+Operator precedence from highest to lowest: postfix `A'`, prefix `NOT`, `AND`, `XOR`, `OR`.
+
+---
+
+## Quine-McCluskey & Petrick's Method on Cyclic Prime Implicant Tables
+
+Two-level minimization seeks a cover of all required on-set minterms (`F = 1`) using the fewest prime implicants, and among ties, the fewest literals. Don't-care minterms (`F = X`) are included during prime generation so cubes can grow as large as possible, but don't-care columns are omitted from the covering chart so they are never forced to be covered.
+
+### Phase 1: Prime Implicant Generation
+
+Each implicant is represented as `{ mask, value, minterms }`, where `1` bits in `mask` mark cared variables and `0` bits mark eliminated (dashed) variables. Implicants are bucketed by the popcount of `value & mask`. Adjacent buckets are compared: two implicants merge whenever their masks are identical and `(v_1 ^ v_2) & mask` has popcount 1. The differing bit is cleared from `mask`, and any implicant that cannot merge further becomes a prime implicant.
+
+### Phase 2: Resolving Cyclic Prime Charts with Petrick's Method
+
+After building the prime implicant chart (rows = prime implicants `P_i`, columns = care minterms `m_j`), any column covered by a single prime identifies an **essential prime implicant**. However, many Boolean functions produce a **cyclic prime implicant table** in which every care minterm is covered by at least two prime implicants, leaving **zero essential primes**.
+
+Consider the 4-variable function `F(A, B, C, D) = Sigma m(1, 2, 3, 4, 5, 6)`:
+
+| Prime Implicant | Binary Cube | Covered Minterms |
+| --- | --- | --- |
+| `P_1 = ~A~B D` | `00-1` | `m_1, m_3` |
+| `P_2 = ~A~B C` | `001-` | `m_2, m_3` |
+| `P_3 = ~A~C D` | `0-01` | `m_1, m_5` |
+| `P_4 = ~A C~D` | `0-10` | `m_2, m_6` |
+| `P_5 = ~A B~D` | `01-0` | `m_4, m_6` |
+| `P_6 = ~A B~C` | `010-` | `m_4, m_5` |
+
+Every minterm in `{1, 2, 3, 4, 5, 6}` is covered by exactly two primes (`m_1` by `P_1, P_3`; `m_2` by `P_2, P_4`; `m_3` by `P_1, P_2`; `m_4` by `P_5, P_6`; `m_5` by `P_3, P_6`; `m_6` by `P_4, P_5`), forming a 6-cycle on the Karnaugh map. Zero primes are essential, and a naive greedy heuristic that picks the first prime covering `m_1` and `m_3` (`P_1`) plus `P_6` (`m_4, m_5`) leaves `m_2` and `m_6` uncovered and can easily pick a 4-term cover.
+
+Petrick's method writes a conjunctive normal form (POS) Boolean condition over the prime selector variables `P_1 .. P_6`, requiring every uncovered minterm column to be satisfied:
+
+```
+Phi = (P_1 + P_3)(P_2 + P_4)(P_1 + P_2)(P_5 + P_6)(P_3 + P_6)(P_4 + P_5) = 1
+```
+
+In `logic.js`, Petrick's condition is solved exactly using branch-and-bound over the uncovered columns:
+1. At each recursion node, select the uncovered minterm column with the fewest covering primes (most constrained variable first) to minimize branching factor.
+2. Branch on each prime covering that minterm, bitmask-OR its covered minterms into the state, and accumulate `(termCount, literalCount)`.
+3. Prune any branch whose `termCount` already exceeds the best complete cover found so far, or equals `bestTerms` with `literalCount >= bestLiterals`.
+
+On `Sigma m(1, 2, 3, 4, 5, 6)`, the solver immediately finds the two exact minimum covers of size 3 (`P_1 + P_4 + P_6 = ~A~BD + ~AC~D + ~AB~C` or `P_2 + P_3 + P_5 = ~A~BC + ~A~CD + ~AB~D`, 3 terms and 9 literals). In `test.js`, this exact solver is verified against a brute-force cube oracle across all 256 3-variable functions (with and without don't cares) and 96 pseudo-random 4-variable functions with don't cares.
+
+---
+
+## Topological DAG Gate Simulator & Clocked D Flip-Flops
+
+`simulateNetlist(netlist, vectors)` evaluates 13 primitive and composite gate types:
+`AND`, `OR`, `NOT`, `XOR`, `NAND`, `NOR`, `XNOR`, `BUF`, `MUX2`, `HALF_ADDER`, `FULL_ADDER`, `DFF`, and `CONST`.
+
+- **Combinational Loop Detection:** `detectCycles(netlist)` runs a depth-first search over the combinational subgraph (treating `DFF` outputs as state sources rather than combinational edges). Any combinational feedback loop throws a `LogicError`, while feedback through a `DFF` register is classified as legal sequential logic (`isSequential: true, hasCombinationalCycle: false`).
+- **Non-Blocking Register Commit:** For each input vector, combinational nodes settle in topological order first; `DFF` inputs (`D`) are sampled from the settled combinational state and committed to `Q` at the vector boundary.
+
+---
 
 ## License
 

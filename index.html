@@ -1,159 +1,143 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="LogicGate: offline digital logic workbench with Quine-McCluskey minimization, Karnaugh maps, netlist simulation, and Verilog export.">
-  <title>LogicGate - Digital Logic Workbench</title>
+  <meta name="description" content="LogicGate: offline IEEE digital logic and Hewlett-Packard style state analyzer bench with Quine-McCluskey minimization, Petrick cover, Gray-code Karnaugh maps, netlist simulation, and Verilog-2001 export.">
+  <title>LogicGate | IEEE Digital Logic &amp; Timing Analyzer Datasheet</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="app" id="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 40 40" role="img"><path d="M5 20h9m12 0h9M14 20a6 6 0 0 1 12 0 6 6 0 0 1-12 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="5" cy="20" r="2.2" fill="currentColor"/><circle cx="35" cy="20" r="2.2" fill="currentColor"/></svg>
-        </div>
-        <div>
-          <h1>LogicGate</h1>
-          <p class="tagline">Boolean minimization and digital design workbench</p>
-        </div>
+    <header class="datasheet-header">
+      <div class="title-block">
+        <div class="doc-meta">Spec. Sheet LG-1364-QM &middot; Combinational &amp; Sequential Logic Synthesis Bench</div>
+        <h1>LogicGate: Exact Quine-McCluskey Minimizer, Gray-Code Karnaugh Map &amp; Logic Analyzer</h1>
+        <p class="tagline">Two-level SOP/POS synthesis with Petrick's exact cyclic cover, topological DAG gate simulation, D-register clocking, and IEEE 1364-2001 Verilog generation.</p>
       </div>
-      <div class="topbar-actions">
-        <span class="offline-badge" title="No network requests, no dependencies">Offline first</span>
-        <button type="button" id="themeToggle" class="btn btn-ghost" aria-pressed="true" title="Switch theme">Light theme</button>
-        <button type="button" id="helpToggle" class="btn btn-ghost" aria-expanded="false">Help</button>
+      <div class="header-actions">
+        <span class="instrument-readout" title="Zero network requests, zero runtime dependencies">Local UMD Engine &middot; Offline</span>
+        <button type="button" id="themeToggle" class="btn" aria-pressed="false" title="Switch instrument theme">HP Analyzer CRT</button>
+        <button type="button" id="helpToggle" class="btn" aria-expanded="false">Operator Reference</button>
       </div>
     </header>
 
     <section class="help-panel" id="helpPanel" hidden>
-      <h2>Quick reference</h2>
+      <h2>Section 0. Boolean Expression Grammar &amp; Verification Notes</h2>
       <div class="help-grid">
         <div>
-          <h3>Expression syntax</h3>
-          <p>Variables <code>A</code> to <code>P</code> or custom names. Operators: <code>&amp;</code> or <code>AND</code>, <code>|</code> or <code>OR</code>, <code>^</code> or <code>XOR</code>, <code>~&amp;</code> or <code>NAND</code>, <code>~|</code> or <code>NOR</code>, <code>~^</code> or <code>XNOR</code>, <code>!</code> or <code>NOT</code>, parentheses, and implicit AND for adjacent terms. Postfix <code>A'</code> complements a variable. Symbolic forms such as <code>A*B+C</code> and <code>!(A+B)</code> are accepted.</p>
+          <h3>0.1 Operator Precedence &amp; Syntax</h3>
+          <p>Variables <code>A</code> through <code>P</code> or custom port identifiers. Precedence from highest to lowest: postfix complement <code>A'</code> and prefix <code>!</code> / <code>~</code> / <code>NOT</code>, product <code>&amp;</code> / <code>*</code> / <code>AND</code> / implicit adjacency <code>AB</code>, exclusive-OR <code>^</code> / <code>XOR</code> / <code>~^</code> / <code>XNOR</code>, and sum <code>|</code> / <code>+</code> / <code>OR</code>. Derived gates <code>~&amp;</code> (<code>NAND</code>) and <code>~|</code> (<code>NOR</code>) are supported.</p>
         </div>
         <div>
-          <h3>Workbench</h3>
-          <p>Click a Karnaugh map cell to cycle <code>0</code> to <code>1</code> to <code>X</code> (don't care). Edit the minterm and don't care lists directly. Every change recomputes prime implicants, the minimal SOP and POS, the truth table, the schematic, the waveform, and the Verilog files.</p>
+          <h3>0.2 Karnaugh Map &amp; Petrick's Method</h3>
+          <p>Click any Gray-coded Karnaugh map cell to cycle <code>0</code> &rarr; <code>1</code> &rarr; <code>X</code> (don't care). Every modification recomputes prime implicants, essential primes, Petrick's exact branch-and-bound minimum cover, the two-level gate schematic, the logic analyzer waveform, and the Verilog-2001 source.</p>
         </div>
         <div>
-          <h3>Export</h3>
-          <p>Download or copy the synthesizable Verilog-2001 module and its self-checking testbench. Simulate them with <code>iverilog -o sim.vvp module.v module_tb.v &amp;&amp; vvp sim.vvp</code>. Everything runs locally in the browser.</p>
+          <h3>0.3 IEEE 1364-2001 Verilog Verification</h3>
+          <p>Download or copy the synthesizable Verilog module and self-checking testbench. Compile and verify locally with Icarus Verilog: <code>iverilog -g2001 -o sim.vvp module.v module_tb.v &amp;&amp; vvp sim.vvp</code>.</p>
         </div>
       </div>
     </section>
 
     <main class="workspace">
-      <aside class="panel controls" aria-label="Function definition">
+      <aside class="panel controls" aria-label="Function specification">
         <div class="panel-head">
-          <h2>Function</h2>
+          <h2>1. Function Specification</h2>
           <span class="panel-hint" id="varCountLabel">4 variables</span>
         </div>
 
         <label class="field" for="varCount">
-          <span>Variables</span>
+          <span>Input Width (Variables)</span>
           <select id="varCount">
-            <option value="2">2 variables</option>
-            <option value="3">3 variables</option>
-            <option value="4" selected>4 variables</option>
+            <option value="2">2 variables (4 states)</option>
+            <option value="3">3 variables (8 states)</option>
+            <option value="4" selected>4 variables (16 states)</option>
           </select>
         </label>
 
         <label class="field" for="presetSelect">
-          <span>Preset</span>
-          <select id="presetSelect"><option value="">Custom function</option></select>
+          <span>Standard IC / Logic Preset</span>
+          <select id="presetSelect"><option value="">Custom specification</option></select>
         </label>
 
         <label class="field" for="varNames">
-          <span>Variable names <small>comma separated</small></span>
+          <span>Port Identifiers <small>(MSB to LSB)</small></span>
           <input id="varNames" type="text" value="A, B, C, D" spellcheck="false" autocomplete="off">
         </label>
 
         <label class="field" for="exprInput">
-          <span>Boolean expression</span>
+          <span>Boolean Equation Input</span>
           <input id="exprInput" type="text" placeholder="A &amp; B | !C" spellcheck="false" autocomplete="off">
         </label>
         <div class="btn-row">
-          <button type="button" id="exprApply" class="btn btn-primary">Apply expression</button>
-          <button type="button" id="clearAll" class="btn btn-ghost">Clear</button>
+          <button type="button" id="exprApply" class="btn btn-primary">Evaluate Equation</button>
+          <button type="button" id="clearAll" class="btn">Zero Map</button>
         </div>
-        <p class="field-note" id="exprStatus" role="status">Enter an expression to fill the map, or click cells below.</p>
+        <p class="field-note" id="exprStatus" role="status">Enter a Boolean equation or toggle Karnaugh map cells.</p>
 
         <div class="field">
-          <span>Minterms (function is 1)</span>
+          <span>On-Set Minterms &Sigma;m (F = 1)</span>
           <textarea id="mintermInput" rows="2" spellcheck="false" placeholder="0, 2, 3, 5"></textarea>
         </div>
         <div class="field">
-          <span>Don't cares (X)</span>
+          <span>Don't-Care Set &Sigma;d (F = X)</span>
           <textarea id="dontCareInput" rows="2" spellcheck="false" placeholder="10, 11, 12"></textarea>
         </div>
 
         <div class="field" for="formSelect">
-          <span>Verilog form</span>
+          <span>Target Two-Level Realization</span>
           <select id="formSelect">
-            <option value="SOP" selected>Sum of products</option>
-            <option value="POS">Product of sums</option>
+            <option value="SOP" selected>Sum of Products (AND-OR)</option>
+            <option value="POS">Product of Sums (OR-AND)</option>
           </select>
         </div>
         <label class="field" for="moduleNameInput">
-          <span>Module name</span>
+          <span>Verilog Module Identifier</span>
           <input id="moduleNameInput" type="text" value="logicgate_module" spellcheck="false" autocomplete="off">
         </label>
 
         <div class="preset-netlist" id="presetNetlist" hidden>
-          <h3>Preset netlist</h3>
+          <h3>Gate-Level Netlist Stimulus</h3>
           <p id="presetNetlistDescription"></p>
-          <button type="button" id="runNetlist" class="btn btn-primary">Simulate netlist</button>
+          <button type="button" id="runNetlist" class="btn btn-primary">Run Netlist Sweep</button>
           <p class="field-note" id="netlistStatus" role="status"></p>
         </div>
       </aside>
 
       <section class="content">
-        <div class="stat-row" id="statRow" aria-label="Solution metrics"></div>
-
-        <div class="panel viz-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Karnaugh map</h2>
-              <p class="panel-sub">Gray coded rows and columns. Click a cell to cycle its value.</p>
-            </div>
-            <div class="legend" id="kmapLegend">
-              <span><i class="swatch swatch-one"></i> 1 (on)</span>
-              <span><i class="swatch swatch-zero"></i> 0 (off)</span>
-              <span><i class="swatch swatch-dc"></i> X (don't care)</span>
-            </div>
-          </div>
-          <div class="kmap-wrap" id="kmapWrap"></div>
-          <div class="group-toggle">
-            <label class="check"><input type="checkbox" id="showGroups" checked> Show prime implicant groups</label>
-            <label class="check"><input type="checkbox" id="showTexture"> Pattern fill for group edges</label>
-          </div>
-        </div>
+        <div class="stat-row" id="statRow" aria-label="Synthesis characteristics"></div>
 
         <div class="two-col">
-          <div class="panel">
+          <div class="panel viz-panel">
             <div class="panel-head">
               <div>
-                <h2>Minimal solution</h2>
-                <p class="panel-sub">Quine-McCluskey primes with Petrick's minimum cover.</p>
+                <h2>2. Interactive Gray-Code Karnaugh Map</h2>
+                <p class="panel-sub">Reflected binary axes (00, 01, 11, 10). Click any cell to step 0 &rarr; 1 &rarr; X.</p>
+              </div>
+              <div class="legend" id="kmapLegend">
+                <span><i class="swatch swatch-one"></i> 1 (On)</span>
+                <span><i class="swatch swatch-zero"></i> 0 (Off)</span>
+                <span><i class="swatch swatch-dc"></i> X (Don't care)</span>
               </div>
             </div>
-            <div class="solution-block" id="solutionBlock"></div>
-            <h3 class="subhead">Prime implicants</h3>
-            <div class="prime-list" id="primeList"></div>
+            <div class="kmap-wrap" id="kmapWrap"></div>
+            <div class="group-toggle">
+              <label class="check"><input type="checkbox" id="showGroups" checked> Show prime implicant index markers</label>
+              <label class="check"><input type="checkbox" id="showTexture"> Crosshatch prime cube overlays</label>
+            </div>
           </div>
 
           <div class="panel">
             <div class="panel-head">
               <div>
-                <h2>Prime implicant groups</h2>
-                <p class="panel-sub">Rectangular cubes on the Karnaugh map grid.</p>
+                <h2>3. Toroidal Prime Cube Overlay</h2>
+                <p class="panel-sub">Prime implicant loops on the Gray-code torus; edge-spanning cubes split across boundaries.</p>
               </div>
               <div class="legend" id="groupLegend"></div>
             </div>
             <div class="svg-host" id="groupSvg"></div>
-            <h3 class="subhead">Group table</h3>
+            <h3 class="subhead">Table 3.1 Selected Cover Implicants</h3>
             <div class="table-scroll" id="groupTable"></div>
           </div>
         </div>
@@ -162,36 +146,55 @@
           <div class="panel">
             <div class="panel-head">
               <div>
-                <h2>Truth table</h2>
-                <p class="panel-sub">All input combinations. Don't cares keep an X output.</p>
+                <h2>4. Exact Quine-McCluskey &amp; Petrick Synthesis</h2>
+                <p class="panel-sub">Minimal SOP and POS equations with gate and literal cost comparison.</p>
               </div>
-              <button type="button" id="ttToggle" class="btn btn-ghost btn-sm">Highlight on rows</button>
             </div>
-            <div class="table-scroll truth-scroll" id="truthTable"></div>
+            <div class="solution-block" id="solutionBlock"></div>
+            <h3 class="subhead">Table 4.1 Complete Prime Implicant Chart</h3>
+            <div class="prime-list" id="primeList"></div>
           </div>
 
           <div class="panel">
             <div class="panel-head">
               <div>
-                <h2>Gate level schematic</h2>
-                <p class="panel-sub">Two level implementation of the selected form.</p>
+                <h2>5. Complete Function Truth Table</h2>
+                <p class="panel-sub">Exhaustive verification of SOP and POS realizations against care minterms.</p>
               </div>
+              <button type="button" id="ttToggle" class="btn btn-sm">Highlight active rows</button>
             </div>
-            <div class="svg-host" id="schematicSvg"></div>
-            <h3 class="subhead">Timing waveform</h3>
-            <div class="svg-host" id="waveformSvg"></div>
+            <div class="table-scroll truth-scroll" id="truthTable"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>6. Two-Level Logic Schematic &amp; HP Timing Analyzer Trace</h2>
+              <p class="panel-sub">Gate-level realization and multi-channel logic analyzer state waveform across input vectors.</p>
+            </div>
+          </div>
+          <div class="schematic-waveform-grid">
+            <div>
+              <h3 class="subhead">Figure 6.1 Two-Level Gate Network</h3>
+              <div class="svg-host" id="schematicSvg"></div>
+            </div>
+            <div>
+              <h3 class="subhead">Figure 6.2 State &amp; Timing Analyzer Graticule</h3>
+              <div class="svg-host" id="waveformSvg"></div>
+            </div>
           </div>
         </div>
 
         <div class="panel export-panel">
           <div class="panel-head">
             <div>
-              <h2>Verilog export</h2>
-              <p class="panel-sub">Synthesizable IEEE 1364 Verilog-2001 module and self-checking testbench.</p>
+              <h2>7. IEEE 1364-2001 Verilog HDL &amp; Self-Checking Testbench</h2>
+              <p class="panel-sub">Synthesizable continuous-assignment RTL module paired with an exhaustive vector testbench.</p>
             </div>
             <div class="btn-row">
-              <button type="button" id="copyModule" class="btn btn-ghost btn-sm">Copy module</button>
-              <button type="button" id="copyTb" class="btn btn-ghost btn-sm">Copy testbench</button>
+              <button type="button" id="copyModule" class="btn btn-sm">Copy RTL</button>
+              <button type="button" id="copyTb" class="btn btn-sm">Copy Testbench</button>
               <button type="button" id="downloadModule" class="btn btn-primary btn-sm">Download .v</button>
               <button type="button" id="downloadTb" class="btn btn-primary btn-sm">Download _tb.v</button>
             </div>
@@ -212,9 +215,9 @@
     </main>
 
     <footer class="footer">
-      <span>LogicGate v1.0.0</span>
-      <span>Zero dependencies. No network access. All computation is local.</span>
-      <span>UMD engine: <code>require('./logic.js')</code> or <code>window.LogicGate</code></span>
+      <span>LogicGate v1.0.0 &middot; IEEE Digital Logic Datasheet &amp; Analyzer Bench</span>
+      <span>Zero runtime dependencies &middot; 52/52 Node.js verification assertions</span>
+      <span>UMD Kernel: <code>require('./logic.js')</code> / <code>window.LogicGate</code></span>
     </footer>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
