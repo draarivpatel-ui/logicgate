@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "LogicGate"
+abstract: >-
+  An offline digital logic synthesis and timing analyzer datasheet bench.
+  Provides Boolean equation parsing, truth tables, exact SOP and POS
+  realisation, Gray-coded Karnaugh maps, gate-level and clocked netlist
+  simulation, and Verilog export.
+type: software
+license: MIT
+repository-code: "https://github.com/draarivpatel-ui/logicgate"
+url: "https://draarivpatel-ui.github.io/logicgate/"
+keywords:
+  - digital-logic
+  - boolean-algebra
+  - quine-mccluskey
+  - karnaugh-map
+  - verilog
+  - datasheet
+  - javascript
+  - zero-dependency
+authors:
+  - family-names: "Patel"
+    given-names: "Aariv"
+    alias: "draarivpatel-ui"
+preferred-citation:
+  type: software
+  title: "LogicGate"
+  version: "1.0.0"
+  date-released: "2026-11-08"
+  license: MIT
+  url: "https://draarivpatel-ui.github.io/logicgate/"
+  authors:
+    - family-names: "Patel"
+      given-names: "Aariv"
+      alias: "draarivpatel-ui"
