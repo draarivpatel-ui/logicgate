@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="LogicGate: offline digital logic workbench with Quine-McCluskey minimization, Karnaugh maps, netlist simulation, and Verilog export.">
+  <title>LogicGate - Digital Logic Workbench</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img"><path d="M5 20h9m12 0h9M14 20a6 6 0 0 1 12 0 6 6 0 0 1-12 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="5" cy="20" r="2.2" fill="currentColor"/><circle cx="35" cy="20" r="2.2" fill="currentColor"/></svg>
+        </div>
+        <div>
+          <h1>LogicGate</h1>
+          <p class="tagline">Boolean minimization and digital design workbench</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="offline-badge" title="No network requests, no dependencies">Offline first</span>
+        <button type="button" id="themeToggle" class="btn btn-ghost" aria-pressed="true" title="Switch theme">Light theme</button>
+        <button type="button" id="helpToggle" class="btn btn-ghost" aria-expanded="false">Help</button>
+      </div>
+    </header>
+
+    <section class="help-panel" id="helpPanel" hidden>
+      <h2>Quick reference</h2>
+      <div class="help-grid">
+        <div>
+          <h3>Expression syntax</h3>
+          <p>Variables <code>A</code> to <code>P</code> or custom names. Operators: <code>&amp;</code> or <code>AND</code>, <code>|</code> or <code>OR</code>, <code>^</code> or <code>XOR</code>, <code>~&amp;</code> or <code>NAND</code>, <code>~|</code> or <code>NOR</code>, <code>~^</code> or <code>XNOR</code>, <code>!</code> or <code>NOT</code>, parentheses, and implicit AND for adjacent terms. Postfix <code>A'</code> complements a variable. Symbolic forms such as <code>A*B+C</code> and <code>!(A+B)</code> are accepted.</p>
+        </div>
+        <div>
+          <h3>Workbench</h3>
+          <p>Click a Karnaugh map cell to cycle <code>0</code> to <code>1</code> to <code>X</code> (don't care). Edit the minterm and don't care lists directly. Every change recomputes prime implicants, the minimal SOP and POS, the truth table, the schematic, the waveform, and the Verilog files.</p>
+        </div>
+        <div>
+          <h3>Export</h3>
+          <p>Download or copy the synthesizable Verilog-2001 module and its self-checking testbench. Simulate them with <code>iverilog -o sim.vvp module.v module_tb.v &amp;&amp; vvp sim.vvp</code>. Everything runs locally in the browser.</p>
+        </div>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <aside class="panel controls" aria-label="Function definition">
+        <div class="panel-head">
+          <h2>Function</h2>
+          <span class="panel-hint" id="varCountLabel">4 variables</span>
+        </div>
+
+        <label class="field" for="varCount">
+          <span>Variables</span>
+          <select id="varCount">
+            <option value="2">2 variables</option>
+            <option value="3">3 variables</option>
+            <option value="4" selected>4 variables</option>
+          </select>
+        </label>
+
+        <label class="field" for="presetSelect">
+          <span>Preset</span>
+          <select id="presetSelect"><option value="">Custom function</option></select>
+        </label>
+
+        <label class="field" for="varNames">
+          <span>Variable names <small>comma separated</small></span>
+          <input id="varNames" type="text" value="A, B, C, D" spellcheck="false" autocomplete="off">
+        </label>
+
+        <label class="field" for="exprInput">
+          <span>Boolean expression</span>
+          <input id="exprInput" type="text" placeholder="A &amp; B | !C" spellcheck="false" autocomplete="off">
+        </label>
+        <div class="btn-row">
+          <button type="button" id="exprApply" class="btn btn-primary">Apply expression</button>
+          <button type="button" id="clearAll" class="btn btn-ghost">Clear</button>
+        </div>
+        <p class="field-note" id="exprStatus" role="status">Enter an expression to fill the map, or click cells below.</p>
+
+        <div class="field">
+          <span>Minterms (function is 1)</span>
+          <textarea id="mintermInput" rows="2" spellcheck="false" placeholder="0, 2, 3, 5"></textarea>
+        </div>
+        <div class="field">
+          <span>Don't cares (X)</span>
+          <textarea id="dontCareInput" rows="2" spellcheck="false" placeholder="10, 11, 12"></textarea>
+        </div>
+
+        <div class="field" for="formSelect">
+          <span>Verilog form</span>
+          <select id="formSelect">
+            <option value="SOP" selected>Sum of products</option>
+            <option value="POS">Product of sums</option>
+          </select>
+        </div>
+        <label class="field" for="moduleNameInput">
+          <span>Module name</span>
+          <input id="moduleNameInput" type="text" value="logicgate_module" spellcheck="false" autocomplete="off">
+        </label>
+
+        <div class="preset-netlist" id="presetNetlist" hidden>
+          <h3>Preset netlist</h3>
+          <p id="presetNetlistDescription"></p>
+          <button type="button" id="runNetlist" class="btn btn-primary">Simulate netlist</button>
+          <p class="field-note" id="netlistStatus" role="status"></p>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="stat-row" id="statRow" aria-label="Solution metrics"></div>
+
+        <div class="panel viz-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Karnaugh map</h2>
+              <p class="panel-sub">Gray coded rows and columns. Click a cell to cycle its value.</p>
+            </div>
+            <div class="legend" id="kmapLegend">
+              <span><i class="swatch swatch-one"></i> 1 (on)</span>
+              <span><i class="swatch swatch-zero"></i> 0 (off)</span>
+              <span><i class="swatch swatch-dc"></i> X (don't care)</span>
+            </div>
+          </div>
+          <div class="kmap-wrap" id="kmapWrap"></div>
+          <div class="group-toggle">
+            <label class="check"><input type="checkbox" id="showGroups" checked> Show prime implicant groups</label>
+            <label class="check"><input type="checkbox" id="showTexture"> Pattern fill for group edges</label>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Minimal solution</h2>
+                <p class="panel-sub">Quine-McCluskey primes with Petrick's minimum cover.</p>
+              </div>
+            </div>
+            <div class="solution-block" id="solutionBlock"></div>
+            <h3 class="subhead">Prime implicants</h3>
+            <div class="prime-list" id="primeList"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Prime implicant groups</h2>
+                <p class="panel-sub">Rectangular cubes on the Karnaugh map grid.</p>
+              </div>
+              <div class="legend" id="groupLegend"></div>
+            </div>
+            <div class="svg-host" id="groupSvg"></div>
+            <h3 class="subhead">Group table</h3>
+            <div class="table-scroll" id="groupTable"></div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Truth table</h2>
+                <p class="panel-sub">All input combinations. Don't cares keep an X output.</p>
+              </div>
+              <button type="button" id="ttToggle" class="btn btn-ghost btn-sm">Highlight on rows</button>
+            </div>
+            <div class="table-scroll truth-scroll" id="truthTable"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Gate level schematic</h2>
+                <p class="panel-sub">Two level implementation of the selected form.</p>
+              </div>
+            </div>
+            <div class="svg-host" id="schematicSvg"></div>
+            <h3 class="subhead">Timing waveform</h3>
+            <div class="svg-host" id="waveformSvg"></div>
+          </div>
+        </div>
+
+        <div class="panel export-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Verilog export</h2>
+              <p class="panel-sub">Synthesizable IEEE 1364 Verilog-2001 module and self-checking testbench.</p>
+            </div>
+            <div class="btn-row">
+              <button type="button" id="copyModule" class="btn btn-ghost btn-sm">Copy module</button>
+              <button type="button" id="copyTb" class="btn btn-ghost btn-sm">Copy testbench</button>
+              <button type="button" id="downloadModule" class="btn btn-primary btn-sm">Download .v</button>
+              <button type="button" id="downloadTb" class="btn btn-primary btn-sm">Download _tb.v</button>
+            </div>
+          </div>
+          <div class="code-grid">
+            <div>
+              <h3 class="subhead" id="moduleFilename">logicgate_module.v</h3>
+              <pre class="code" id="moduleCode" tabindex="0"></pre>
+            </div>
+            <div>
+              <h3 class="subhead" id="tbFilename">logicgate_module_tb.v</h3>
+              <pre class="code" id="tbCode" tabindex="0"></pre>
+            </div>
+          </div>
+          <p class="field-note" id="exportStatus" role="status"></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>LogicGate v1.0.0</span>
+      <span>Zero dependencies. No network access. All computation is local.</span>
+      <span>UMD engine: <code>require('./logic.js')</code> or <code>window.LogicGate</code></span>
+    </footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
