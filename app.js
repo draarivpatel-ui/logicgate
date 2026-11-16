@@ -23,6 +23,7 @@
   };
   state.probe = 0;
   state.rtlCheck = null;
+  state.inputError = '';
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {};
@@ -84,6 +85,7 @@
   }
 
   function syncInputs() {
+    state.inputError = '';
     [el.varNames, el.exprInput, el.mintermInput, el.dontCareInput, el.moduleNameInput].forEach(function (node) { node.removeAttribute('aria-invalid'); });
     el.varCount.value = String(state.numVars);
     el.varCountLabel.textContent = state.numVars + ' variables';
@@ -116,6 +118,7 @@
       state.rtlCheck = LG.verifyVerilog(verilog);
       state.result = result;
       state.verilog = verilog;
+      state.inputError = '';
       setExportEnabled(true);
       renderAll();
       return true;
@@ -137,7 +140,13 @@
     renderSchematic(r);
     renderWaveform(r);
     renderExport(state.verilog);
-    renderProof();
+    if (state.inputError) {
+      setExportEnabled(false);
+      setStatus(el.exprStatus, state.inputError, 'error');
+      el.verificationBadges.textContent = 'Resolve the input error to verify this specification.';
+    } else {
+      renderProof();
+    }
     renderProbe();
   }
 
@@ -146,6 +155,7 @@
   }
 
   function inputError(field, error) {
+    state.inputError = error.message;
     if (field) field.setAttribute('aria-invalid', 'true');
     setStatus(el.exprStatus, error.message, 'error');
     setExportEnabled(false);

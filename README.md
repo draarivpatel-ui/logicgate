@@ -34,7 +34,7 @@ Node.js 22 or newer:
 node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js
 ```
 
-The verified suite contains **125 tests**: 52 original engine checks, 21 regression and oracle checks, 30 Verilog consumer checks and 22 DOM interaction checks. The local run passed with **0 failures and 0 skipped tests**.
+The verified suite contains **126 tests**: 52 original engine checks, 21 regression and oracle checks, 30 Verilog consumer checks and 23 DOM interaction checks. The local run passed with **0 failures and 0 skipped tests**.
 
 The original oracle suite covers all 81 disjoint care/don't-care specifications for two variables, every three-variable Boolean function, 256 three-variable functions with selected don't cares and 96 four-variable samples. A separate cube oracle checks both term and literal optimality for all 256 three-variable functions.
 

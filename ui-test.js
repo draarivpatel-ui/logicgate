@@ -139,3 +139,17 @@ test('direct-wire and constant schematics agree with zero-gate metrics', () => {
   const h=bench(); h.get('clearAll').click(); assert.match(h.get('schematicSvg').textContent,/Constant function/);
   h.get('exprInput').value='A'; h.get('exprApply').click(); assert.match(h.get('schematicSvg').textContent,/Direct wire, zero logic gates/); h.dispose();
 });
+
+test('theme toggle preserves active input errors and keeps stale exports disabled', () => {
+  const h = bench();
+  h.get('exprInput').value = 'A & ('; h.get('exprApply').click();
+  assert.equal(h.get('downloadModule').disabled, true);
+  assert.match(h.get('verificationBadges').textContent, /Resolve the input error/);
+  h.get('themeToggle').click();
+  assert.equal(h.document.documentElement.getAttribute('data-theme'), 'light');
+  assert.equal(h.get('downloadModule').disabled, true);
+  assert.match(h.get('verificationBadges').textContent, /Resolve the input error/);
+  assert.equal(h.get('exprStatus').className.includes('is-error'), true);
+  h.dispose();
+});
+
