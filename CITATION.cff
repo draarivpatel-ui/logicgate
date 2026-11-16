@@ -9,7 +9,7 @@ abstract: >-
 type: software
 license: MIT
 repository-code: "https://github.com/draarivpatel-ui/logicgate"
-url: "https://draarivpatel-ui.github.io/logicgate/"
+url: "https://aariv.me/logicgate/"
 keywords:
   - digital-logic
   - boolean-algebra
@@ -26,10 +26,10 @@ authors:
 preferred-citation:
   type: software
   title: "LogicGate"
-  version: "1.0.0"
-  date-released: "2026-11-08"
+  version: "2.0.0"
+  date-released: "2026-11-15"
   license: MIT
-  url: "https://draarivpatel-ui.github.io/logicgate/"
+  url: "https://aariv.me/logicgate/"
   authors:
     - family-names: "Patel"
       given-names: "Aariv"

@@ -45,7 +45,7 @@ function bruteBest(numVars, onSet, dcSet) {
 function popcount(n) { var c = 0; while (n) { n &= n - 1; c += 1; } return c; }
 
 test('module exposes the public API', function () {
-  assert.equal(LG.version, '1.0.0');
+  assert.equal(LG.version, '2.0.0');
   ['parseExpr', 'evalTruthTable', 'minimizeBoolean', 'karnaughMap', 'simulateNetlist',
     'detectCycles', 'exportVerilog', 'getPreset', 'listPresets', 'presetTruthTable'].forEach(function (k) {
       assert.equal(typeof LG[k], 'function', k + ' should be a function');

@@ -1,121 +1,94 @@
 # LogicGate
 
-An offline digital logic synthesis and timing analyzer datasheet bench. LogicGate parses Boolean equations, constructs truth tables, computes exact two-level Sum of Products (SOP) and Product of Sums (POS) realizations via Quine-McCluskey and Petrick's method, renders Gray-coded Karnaugh maps with toroidal prime-cube overlays, simulates gate-level DAG and clocked D-register netlists, and exports synthesizable IEEE 1364-2001 Verilog modules with self-checking testbenches.
+**Make logic. Prove every state.** A local hardware workbench that turns Boolean functions into exact circuits, explains their costs and checks the emitted Verilog against every care input.
 
-The repository has zero runtime dependencies and makes zero network requests. Open `index.html` directly from disk (`file://`) or serve the directory from any static host. The computation engine is a standalone UMD module (`require('./logic.js')` in Node.js or `window.LogicGate` in the browser).
+[Open the workbench](https://aariv.me/logicgate/). The browser needs no install, build, account, external asset or network request. Open `index.html` from disk or publish this directory on a static host.
 
-**Live bench:** https://draarivpatel-ui.github.io/logicgate/
+## A judge demo in seconds
 
----
+1. Choose **Beat the greedy choice**. Six care states form a cyclic prime chart with zero essential primes; the solver finds a three-term, nine-literal cover.
+2. Choose **Find the hidden hazard**. Inspect the A transition from m3 to m7 with B=C=1. The missing `B & C` consensus term is identified directly.
+3. Choose **Verify all 512 vectors**. A true generate/propagate lookahead netlist is checked against integer addition across every input combination.
+4. Download the RTL, exhaustive testbench or proof JSON. The live badges verify SOP, POS and the RTL text after parsing it back.
 
-## Repository Contents
+The carry scenario displays and exports a four-input upper slice with C2=1. Its separate nine-input lookahead netlist checks all 512 vectors. The exported slice name includes `upper_slice`.
 
-| File | Purpose |
-| --- | --- |
-| `logic.js` | UMD synthesis and simulation kernel: recursive-descent parser, Quine-McCluskey, Petrick exact cover, Gray-code Karnaugh map, DAG/DFF netlist simulator, Verilog-2001 exporter |
-| `index.html` | IEEE Digital Logic & Hewlett-Packard state analyzer datasheet markup |
-| `style.css` | IEEE datasheet paper (light) and HP 16500B CRT logic analyzer (dark) themes, print stylesheet |
-| `app.js` | Browser controller: interactive Karnaugh map, toroidal wrap cube splitter, gate schematic, analyzer waveform, truth table, Verilog export |
-| `test.js` | 52 `node:test` assertions including brute-force optimality oracles across 2, 3, and 4 variables |
-| `.nojekyll` | Static GitHub Pages marker |
-| `LICENSE` | MIT |
+## Engineering features
 
----
+- Recursive-descent Boolean parsing with explicit precedence, implicit products and postfix prime complements.
+- Quine-McCluskey prime generation and an exact branch-and-bound cover, minimizing terms first and literals second.
+- BigInt coverage columns prevent 32-bit aliasing in large cyclic charts. A regression covers 48 nonessential care columns.
+- Independently computed SOP and POS, Gray-code Karnaugh maps and split overlays for groups crossing an edge.
+- Shared-inverter, balanced two-input gate counts and depth estimates. The optional 2 ns per level model is illustrative, before technology mapping.
+- Static-1 and static-0 transition analysis for the selected cover. Dynamic glitches and real device delays are not simulated.
+- Thirteen gate types, topological combinational evaluation, loop rejection and simultaneous clocked D-register updates.
+- Verilog-2001 identifiers, collision-safe ports and testbench locals, don't-care masking and matched module/testbench filenames.
+- Input toggles, map and waveform inspection, keyboard map navigation, persistent light/dark themes, labeled controls and visible validation failures.
+- Invalid input disables stale exports until a valid specification is applied.
 
-## Quick Start & Hardware Verification
+## Verification
 
-Run the 52-test Node.js verification suite and syntax checks:
+Node.js 22 or newer:
 
 ```sh
-node --test test.js
-node --check logic.js
-node --check app.js
+node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js
 ```
 
-Export a Verilog-2001 module and self-checking testbench from the command line and verify with Icarus Verilog (`iverilog`):
+The verified suite contains **125 tests**: 52 original engine checks, 21 regression and oracle checks, 30 Verilog consumer checks and 22 DOM interaction checks. The local run passed with **0 failures and 0 skipped tests**.
+
+The original oracle suite covers all 81 disjoint care/don't-care specifications for two variables, every three-variable Boolean function, 256 three-variable functions with selected don't cares and 96 four-variable samples. A separate cube oracle checks both term and literal optimality for all 256 three-variable functions.
+
+The Verilog consumer suite invokes installed `iverilog -g2001` and `vvp` for 30 SOP/POS modules and their exhaustive testbenches, including reserved words and collisions with testbench identifiers. These consumer checks are reported as skipped when Icarus Verilog is unavailable. The Node engine and DOM suites remain dependency free.
+
+DOM tests compile and execute the actual scripts against the shipped HTML using a deterministic local adapter. They cover startup, every preset, editing, focus preservation, keyboard inspection, malformed inputs, exports, clipboard handling and theme state. This is a controller check, not a browser layout screenshot.
+
+## Expression grammar
+
+| Operation | Syntax |
+| --- | --- |
+| Complement | `!A`, `~A`, `NOT A`, `A'` |
+| AND | `A & B`, `A * B`, `A AND B`, `AB` with explicit single-letter variables |
+| XOR | `A ^ B`, `A XOR B` |
+| OR | `A | B`, `A + B`, `A OR B` |
+| Derived gates | `A NAND B`, `A NOR B`, `A XNOR B`, `A ~& B`, `A ~| B`, `A ~^ B` |
+| Constants | `0`, `1`, `TRUE`, `FALSE` |
+
+Precedence is complement, AND/NAND, XOR/XNOR, then OR/NOR. `A !B` means `A & !B`; only a prime is a postfix complement. Names are case insensitive and must be unique. Boolean operator words cannot be variable names.
+
+The map supports two to four inputs. The engine supports one to sixteen inputs with explicit resource budgets of 2,000,000 prime comparisons and 200,000 cover search states. Budget exhaustion throws an actionable error instead of returning an approximate result. Fully specified sixteen-input constants use a direct fast path.
+
+## Export and independent hardware simulation
+
+```js
+const L = require('./logic.js');
+const spec = { numVars: 3, minterms: [3, 5, 6, 7], moduleName: 'majority3', outputName: 'vote' };
+const bundle = L.exportVerilog(spec);
+console.log(L.verifyVerilog(bundle)); // 8 care vectors checked
+const report = L.exportVerificationJSON(spec);
+```
+
+After downloading a module and testbench:
 
 ```sh
-node -e "const fs=require('fs'),L=require('./logic.js'); const v=L.exportVerilog({numVars:3,minterms:[3,5,6,7],form:'SOP',moduleName:'majority3',outputName:'vote'}); fs.writeFileSync(v.filename,v.module); fs.writeFileSync(v.testbenchFilename,v.testbench)"
 iverilog -g2001 -o sim.vvp majority3.v majority3_tb.v
 vvp sim.vvp
 ```
 
-Output:
+The testbench prints `ALL 8 VECTORS PASS` after exhaustive verification. Don't-care vectors are explicitly labeled and excluded from failures.
 
-```
-VCD info: dumpfile majority3.vcd opened for output.
-ALL 8 VECTORS PASS
-```
+## Source map
 
----
-
-## Boolean Expression Grammar
-
-Variables default to `A` through `P` or any explicit port identifier list passed to the engine. Adjacency between single-letter variables (`AB`) compiles to implicit `AND`.
-
-| Operation | Accepted Syntax |
+| File | Responsibility |
 | --- | --- |
-| Complement (NOT) | `!A`, `~A`, `NOT A`, postfix `A'` |
-| Product (AND) | `A & B`, `A && B`, `A * B`, `A AND B`, implicit `AB` |
-| Exclusive-OR (XOR) | `A ^ B`, `A XOR B` |
-| Sum (OR) | `A | B`, `A || B`, `A + B`, `A OR B` |
-| Derived Gates | `A ~& B` (`NAND`), `A ~| B` (`NOR`), `A ~^ B` (`XNOR`) |
-| Constants & Comments | `0`, `1`, `TRUE`, `FALSE`, line `// ...`, block `/* ... */` |
+| `logic.js` | Parser, exact synthesis, hazards, netlist simulation, Verilog and proof exporters |
+| `app.js` | Specification editing, visualization, inspection and downloads |
+| `index.html`, `style.css` | Accessible responsive workbench and themes |
+| `test.js`, `regression-test.js` | Engine invariants and independent optimality oracles |
+| `export-test.js` | Real Verilog-2001 compiler and simulation checks |
+| `ui-test.js`, `dom-harness.js` | Actual controller behavior with deterministic DOM and canvas adapters |
 
-Operator precedence from highest to lowest: postfix `A'`, prefix `NOT`, `AND`, `XOR`, `OR`.
+## Scope and next steps
 
----
+Exports synthesize combinational functions. The netlist simulator supports registers, while sequential RTL export, device timing, technology mapping and automated consensus insertion are future work. Results prove logical equivalence under binary inputs and the supplied care mask.
 
-## Quine-McCluskey & Petrick's Method on Cyclic Prime Implicant Tables
-
-Two-level minimization seeks a cover of all required on-set minterms (`F = 1`) using the fewest prime implicants, and among ties, the fewest literals. Don't-care minterms (`F = X`) are included during prime generation so cubes can grow as large as possible, but don't-care columns are omitted from the covering chart so they are never forced to be covered.
-
-### Phase 1: Prime Implicant Generation
-
-Each implicant is represented as `{ mask, value, minterms }`, where `1` bits in `mask` mark cared variables and `0` bits mark eliminated (dashed) variables. Implicants are bucketed by the popcount of `value & mask`. Adjacent buckets are compared: two implicants merge whenever their masks are identical and `(v_1 ^ v_2) & mask` has popcount 1. The differing bit is cleared from `mask`, and any implicant that cannot merge further becomes a prime implicant.
-
-### Phase 2: Resolving Cyclic Prime Charts with Petrick's Method
-
-After building the prime implicant chart (rows = prime implicants `P_i`, columns = care minterms `m_j`), any column covered by a single prime identifies an **essential prime implicant**. However, many Boolean functions produce a **cyclic prime implicant table** in which every care minterm is covered by at least two prime implicants, leaving **zero essential primes**.
-
-Consider the 4-variable function `F(A, B, C, D) = Sigma m(1, 2, 3, 4, 5, 6)`:
-
-| Prime Implicant | Binary Cube | Covered Minterms |
-| --- | --- | --- |
-| `P_1 = ~A~B D` | `00-1` | `m_1, m_3` |
-| `P_2 = ~A~B C` | `001-` | `m_2, m_3` |
-| `P_3 = ~A~C D` | `0-01` | `m_1, m_5` |
-| `P_4 = ~A C~D` | `0-10` | `m_2, m_6` |
-| `P_5 = ~A B~D` | `01-0` | `m_4, m_6` |
-| `P_6 = ~A B~C` | `010-` | `m_4, m_5` |
-
-Every minterm in `{1, 2, 3, 4, 5, 6}` is covered by exactly two primes (`m_1` by `P_1, P_3`; `m_2` by `P_2, P_4`; `m_3` by `P_1, P_2`; `m_4` by `P_5, P_6`; `m_5` by `P_3, P_6`; `m_6` by `P_4, P_5`), forming a 6-cycle on the Karnaugh map. Zero primes are essential, and a naive greedy heuristic that picks the first prime covering `m_1` and `m_3` (`P_1`) plus `P_6` (`m_4, m_5`) leaves `m_2` and `m_6` uncovered and can easily pick a 4-term cover.
-
-Petrick's method writes a conjunctive normal form (POS) Boolean condition over the prime selector variables `P_1 .. P_6`, requiring every uncovered minterm column to be satisfied:
-
-```
-Phi = (P_1 + P_3)(P_2 + P_4)(P_1 + P_2)(P_5 + P_6)(P_3 + P_6)(P_4 + P_5) = 1
-```
-
-In `logic.js`, Petrick's condition is solved exactly using branch-and-bound over the uncovered columns:
-1. At each recursion node, select the uncovered minterm column with the fewest covering primes (most constrained variable first) to minimize branching factor.
-2. Branch on each prime covering that minterm, bitmask-OR its covered minterms into the state, and accumulate `(termCount, literalCount)`.
-3. Prune any branch whose `termCount` already exceeds the best complete cover found so far, or equals `bestTerms` with `literalCount >= bestLiterals`.
-
-On `Sigma m(1, 2, 3, 4, 5, 6)`, the solver immediately finds the two exact minimum covers of size 3 (`P_1 + P_4 + P_6 = ~A~BD + ~AC~D + ~AB~C` or `P_2 + P_3 + P_5 = ~A~BC + ~A~CD + ~AB~D`, 3 terms and 9 literals). In `test.js`, this exact solver is verified against a brute-force cube oracle across all 256 3-variable functions (with and without don't cares) and 96 pseudo-random 4-variable functions with don't cares.
-
----
-
-## Topological DAG Gate Simulator & Clocked D Flip-Flops
-
-`simulateNetlist(netlist, vectors)` evaluates 13 primitive and composite gate types:
-`AND`, `OR`, `NOT`, `XOR`, `NAND`, `NOR`, `XNOR`, `BUF`, `MUX2`, `HALF_ADDER`, `FULL_ADDER`, `DFF`, and `CONST`.
-
-- **Combinational Loop Detection:** `detectCycles(netlist)` runs a depth-first search over the combinational subgraph (treating `DFF` outputs as state sources rather than combinational edges). Any combinational feedback loop throws a `LogicError`, while feedback through a `DFF` register is classified as legal sequential logic (`isSequential: true, hasCombinationalCycle: false`).
-- **Non-Blocking Register Commit:** For each input vector, combinational nodes settle in topological order first; `DFF` inputs (`D`) are sampled from the settled combinational state and committed to `Q` at the vector boundary.
-
----
-
-## License
-
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE). Submission copy is in [DEVPOST_UPGRADE.md](DEVPOST_UPGRADE.md).

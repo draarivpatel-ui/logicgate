@@ -27,5 +27,8 @@ jobs:
           node --version
           npm --version
 
+      - name: Install Verilog consumer tools
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
       - name: Run test suite
-        run: node --test
+        run: node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js

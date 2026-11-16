@@ -12,6 +12,8 @@
   'use strict';
 
   var MAX_VARS = 16;
+  var MAX_PRIME_COMPARISONS = 2000000;
+  var MAX_COVER_STATES = 200000;
   var DEFAULT_VAR_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
 
   function LogicError(message) {
@@ -29,17 +31,24 @@
       if (typeof v !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) {
         throw LogicError('invalid variable name at index ' + i + ': ' + String(v));
       }
-      if (seen[v]) throw LogicError('duplicate variable name: ' + v);
-      seen[v] = true;
+      if (seen[keyOf(v)]) throw LogicError('duplicate variable name: ' + v);
+      if (/^(AND|OR|XOR|NAND|NOR|XNOR|NOT|TRUE|FALSE|ONE|ZERO|HIGH|LOW)$/i.test(v)) {
+        throw LogicError('reserved Boolean word cannot be a variable: ' + v);
+      }
+      seen[keyOf(v)] = true;
       return v;
     });
     return out;
   }
 
   function resolveVarNames(numVars, vars) {
-    if (vars && vars.length) return normalizeVars(vars);
     if (!Number.isInteger(numVars) || numVars < 1 || numVars > MAX_VARS) {
       throw LogicError('numVars must be an integer between 1 and ' + MAX_VARS);
+    }
+    if (vars != null) {
+      var names = normalizeVars(vars);
+      if (names.length !== numVars) throw LogicError('numVars must equal vars.length');
+      return names;
     }
     return DEFAULT_VAR_NAMES.slice(0, numVars);
   }
@@ -136,7 +145,7 @@
         continue;
       }
       if (ch === '!' || ch === '~' || ch === "'") {
-        tokens.push({ t: 'not', v: '!' });
+        tokens.push({ t: ch === "'" ? 'postfix' : 'not', v: '!' });
         i += 1;
         continue;
       }
@@ -150,10 +159,11 @@
     return tokens;
   }
 
-  var BINARY_PRECEDENCE = { '~&': 4, '~|': 4, '~^': 4, '&': 4, '^': 3, '|': 2 };
+  var BINARY_PRECEDENCE = { '~&': 4, '~|': 2, '~^': 3, '&': 4, '^': 3, '|': 2 };
 
   /* Parse with implicit AND for adjacent primaries. Returns an AST. */
   function parseExpr(source, vars) {
+    if (typeof source !== 'string' || source.length > 16384) throw LogicError('expression must be a string of at most 16384 characters');
     var names = vars == null ? null : normalizeVars(vars);
     var tokens = tokenize(source, names);
     var pos = 0;
@@ -221,12 +231,12 @@
     }
 
     function parseUnary() {
-      /* Leading NOT is prefix; A' and A! are postfix complements. */
+      /* A prime is postfix; !, ~ and NOT begin the next primary. */
       var prefix = 0;
       while (peek() && peek().t === 'not') { take(); prefix += 1; }
       var node = peek() && peek().t === 'lp' ? parseGroup() : parsePrimary();
       var flips = prefix;
-      while (peek() && peek().t === 'not') { take(); flips += 1; }
+      while (peek() && peek().t === 'postfix') { take(); flips += 1; }
       for (var i = 0; i < flips; i += 1) node = { type: 'NOT', args: [node] };
       return node;
     }
@@ -259,6 +269,7 @@
       });
     }
     reindex(tree, varNames);
+    if (varNames.length > MAX_VARS) throw LogicError('expression exceeds ' + MAX_VARS + ' variables');
     return {
       ast: tree,
       vars: varNames,
@@ -272,7 +283,7 @@
     acc = acc || [];
     if (!node || typeof node !== 'object') return acc;
     if (node.type === 'VAR') {
-      if (acc.indexOf(node.name) < 0) acc.push(node.name);
+      if (!acc.some(function (name) { return keyOf(name) === keyOf(node.name); })) acc.push(node.name);
       return acc;
     }
     (node.args || []).forEach(function (a) { collectVars(a, acc); });
@@ -346,7 +357,7 @@
     var table = [];
     var minterms = [];
     for (var m = 0; m < rows; m += 1) {
-      var inputs = {};
+      var inputs = Object.create(null);
       for (var i = 0; i < names.length; i += 1) {
         inputs[names[i]] = (m >> (names.length - 1 - i)) & 1;
       }
@@ -363,6 +374,7 @@
 
   /* Parse a minterm or don't-care list from text or arrays. */
   function parseMintermList(value, numVars) {
+    resolveVarNames(numVars);
     var limit = 1 << numVars;
     var out = [];
     var values;
@@ -374,6 +386,10 @@
     else throw LogicError('minterm list must be a string, number, or array');
     values.forEach(function (item) {
       if (typeof item === 'string' && (item.trim().toLowerCase() === 'x' || item.trim() === '-')) return;
+      if ((typeof item !== 'number' && typeof item !== 'string') ||
+          (typeof item === 'string' && !/^\d+$/.test(item.trim()))) {
+        throw LogicError('invalid minterm ' + String(item));
+      }
       var n = Number(item);
       if (!Number.isInteger(n) || n < 0 || n >= limit) {
         throw LogicError('minterm ' + String(item) + ' out of range 0..' + (limit - 1));
@@ -417,6 +433,10 @@
   function isPowerOfTwo(n) { return n > 0 && (n & (n - 1)) === 0; }
 
   function primeImplicants(numVars, terms) {
+    resolveVarNames(numVars);
+    terms = parseMintermList(terms, numVars);
+    if (terms.length === (1 << numVars)) return [{ mask: 0, value: 0, minterms: terms }];
+    var comparisons = 0;
     var groups = new Map();
     terms.slice().sort(function (a, b) { return a - b; }).forEach(function (m) {
       if (m < 0 || m >= (1 << numVars)) throw LogicError('term ' + m + ' out of range');
@@ -442,6 +462,7 @@
         if (onesKeys[gi + 1] !== onesKeys[gi] + 1) continue;
         low.forEach(function (a) {
           high.forEach(function (b) {
+            if (++comparisons > MAX_PRIME_COMPARISONS) throw LogicError('Exact prime generation budget exceeded; reduce the variable count or simplify the function');
             if (a.mask !== b.mask) return;
             var diff = (a.value ^ b.value) & a.mask;
             if (!isPowerOfTwo(diff)) return;
@@ -483,19 +504,22 @@
     var targetIndex = new Map();
     targetSet.forEach(function (m, i) { targetIndex.set(m, i); });
     var candidates = primes.map(function (p, i) {
-      var bits = 0;
+      var bits = 0n;
       p.minterms.forEach(function (m) {
-        if (targetIndex.has(m)) bits |= 1 << targetIndex.get(m);
+        if (targetIndex.has(m)) bits |= 1n << BigInt(targetIndex.get(m));
       });
       return { index: i, bits: bits, literals: literalCost(p), size: p.minterms.length };
-    }).filter(function (c) { return c.bits !== 0; });
+    }).filter(function (c) { return c.bits !== 0n; });
     if (candidates.length === 0) throw LogicError('no prime implicant covers the required minterms');
-    var full = (1 << targetSet.length) - 1;
+    var full = (1n << BigInt(targetSet.length)) - 1n;
+    function bitCount(bits) { var count = 0; while (bits) { bits &= bits - 1n; count++; } return count; }
     /* Sort by coverage size descending to find good solutions early. */
     candidates.sort(function (a, b) {
-      return popcount(b.bits) - popcount(a.bits) || a.literals - b.literals;
+      return bitCount(b.bits) - bitCount(a.bits) || a.literals - b.literals || a.index - b.index;
     });
     var best = null;
+    var visited = new Map();
+    var searched = 0;
     function score(sel) {
       var gates = sel.length;
       var literals = 0;
@@ -509,6 +533,11 @@
       return false;
     }
     function search(start, covered, selected) {
+      if (++searched > MAX_COVER_STATES) throw LogicError('Exact cover budget exceeded; reduce the variable count or simplify the function');
+      var currentScore = score(selected);
+      var prior = visited.get(covered);
+      if (prior && !better(currentScore, prior)) return;
+      visited.set(covered, currentScore);
       if (best) {
         var optimistic = score(selected);
         if (optimistic[0] > best.s[0]) return;
@@ -523,8 +552,8 @@
       var bestTarget = -1;
       var bestOptions = null;
       for (var t = 0; t < targetSet.length; t += 1) {
-        if (covered & (1 << t)) continue;
-        var options = candidates.filter(function (c) { return c.bits & (1 << t); });
+        if (covered & (1n << BigInt(t))) continue;
+        var options = candidates.filter(function (c) { return c.bits & (1n << BigInt(t)); });
         if (bestOptions === null || options.length < bestOptions.length) {
           bestOptions = options;
           bestTarget = t;
@@ -541,7 +570,7 @@
       });
       void bestTarget;
     }
-    search(0, 0, []);
+    search(0, 0n, []);
     if (!best) throw LogicError('failed to find a cover');
     return best.indices.map(function (i) { return primes[i]; });
   }
@@ -619,15 +648,24 @@
       else innerGates = chosen.length - 1;
       gateCount = {
         not: notGates,
-        and: kind === 'SOP' ? innerGates : outerGates,
-        or: kind === 'SOP' ? outerGates : innerGates,
+        and: innerGates,
+        or: outerGates,
         nand: 0,
         total: notGates + innerGates + outerGates
       };
     }
     /* NAND-NAND and NOR-NOR implementations use one gate per product/sum plus one output gate. */
     gateCount.nand = gateCount.total === 0 ? 0 : chosen.length + 1;
-    var depth = gateCount.total === 0 ? 0 : 1 + (kind === 'SOP' ? 1 : 1) + (terms.length > 1 ? 1 : 0);
+    var depth = 0;
+    chosen.forEach(function (imp) {
+      var inversion = 0;
+      for (var i = 0; i < numVars; i++) {
+        var bit = 1 << (numVars - 1 - i);
+        if ((imp.mask & bit) && (kind === 'POS' ? !!(imp.value & bit) : !(imp.value & bit))) inversion = 1;
+      }
+      depth = Math.max(depth, inversion + (literalCost(imp) > 1 ? Math.ceil(Math.log2(literalCost(imp))) : 0));
+    });
+    if (chosen.length > 1) depth += Math.ceil(Math.log2(chosen.length));
     return {
       terms: terms,
       products: products,
@@ -642,7 +680,7 @@
         units: 'gate-delays',
         levels: depth,
         estimate: depth * 2,
-        note: '2 ns per gate level, worst-case combinational path, before technology mapping'
+        note: 'Illustrative 2 ns per level of balanced two-input gates and shared inverters; not a device timing measurement'
       }
     };
   }
@@ -733,6 +771,10 @@
     var sopOutputs = evaluateSolution(sopChosen, numVars, 'SOP', size);
     var posOutputs = evaluateSolution(posChosen, numVars, 'POS', size);
 
+    var hazards = {
+      sop: staticHazards(sopChosen, on, names, numVars, 'SOP'),
+      pos: staticHazards(posChosen, zeros, names, numVars, 'POS')
+    };
     return {
       numVars: numVars,
       vars: names,
@@ -746,6 +788,7 @@
       posPrimeImplicants: posPrimes.map(function (p) { return describePrime(p, names, numVars, 'POS'); }),
       sop: sop,
       pos: pos,
+      hazards: hazards,
       metrics: {
         gateCount: sop.gateCount,
         literalCount: sop.literalCount,
@@ -786,11 +829,29 @@
     };
   }
 
+  /* An adjacent pair of care states needs a common cube to avoid a static hazard. */
+  function staticHazards(chosen, targets, names, numVars, kind) {
+    var targetSet = new Set(targets);
+    var found = [];
+    targets.forEach(function (from) {
+      for (var i = 0; i < numVars; i++) {
+        var bit = 1 << (numVars - 1 - i);
+        var to = from ^ bit;
+        if (to <= from || !targetSet.has(to)) continue;
+        if (chosen.some(function (cube) { return covers(cube, from) && covers(cube, to); })) continue;
+        var cube = { mask: ((1 << numVars) - 1) & ~bit, value: from & ~bit, minterms: [from, to] };
+        found.push({ from: from, to: to, variable: names[i], type: kind === 'SOP' ? 'static-1' : 'static-0', consensus: implicantToProduct(cube, names, numVars, kind === 'POS') });
+      }
+    });
+    return found;
+  }
+
   /* Karnaugh map layout for 2, 3, and 4 variables. */
   function karnaughMap(numVars, minterms, dontCares) {
-    if (numVars < 2 || numVars > 4) throw LogicError('Karnaugh map supports 2 to 4 variables');
+    if (!Number.isInteger(numVars) || numVars < 2 || numVars > 4) throw LogicError('Karnaugh map supports 2 to 4 variables');
     var on = parseMintermList(minterms, numVars);
     var dc = parseMintermList(dontCares, numVars);
+    if (on.some(function (m) { return dc.indexOf(m) >= 0; })) throw LogicError('minterm is also listed as a don\'t care');
     var size = 1 << numVars;
     var rowVars = Math.floor(numVars / 2);
     var colVars = numVars - rowVars;
@@ -849,14 +910,17 @@
   };
 
   function buildGraph(netlist) {
+    if (!netlist || typeof netlist !== 'object') throw LogicError('netlist must be an object');
     var nodes = Array.isArray(netlist.nodes) ? netlist.nodes : [];
     var edges = Array.isArray(netlist.edges) ? netlist.edges : [];
     var inputs = Array.isArray(netlist.inputs) ? netlist.inputs : [];
+    if (inputs.length > MAX_VARS) throw LogicError('netlist supports at most ' + MAX_VARS + ' external inputs');
     var byName = new Map();
     /* External inputs are virtual nodes. IN:<name> is an alias for <name>. */
     inputs.forEach(function (inp) {
       var name = typeof inp === 'string' ? inp : inp.name;
-      if (typeof name !== 'string' || !name) throw LogicError('input must have a name');
+      if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw LogicError('input must have a valid identifier name');
+      if (byName.has('IN:' + name)) throw LogicError('duplicate input name: ' + name);
       byName.set('IN:' + name, {
         id: 'IN:' + name, type: 'INPUT', virtual: true,
         def: { inputs: 0, outputs: ['y'], fn: function () { return 0; } },
@@ -864,7 +928,7 @@
       });
     });
     nodes.forEach(function (n) {
-      if (!n || typeof n.id !== 'string') throw LogicError('each node needs a string id');
+      if (!n || typeof n.id !== 'string' || !n.id || n.id.indexOf('IN:') === 0) throw LogicError('each node needs a nonempty string id outside the IN: namespace');
       if (byName.has(n.id)) throw LogicError('duplicate node id: ' + n.id);
       var type = String(n.type || '').toUpperCase();
       var def = GATE_DEFS[type];
@@ -991,18 +1055,30 @@
     });
     var cycles = [];
     var hazards = [];
-    var maxSteps = opts.maxSteps || 200;
+    var maxSteps = opts.maxSteps == null ? 200 : opts.maxSteps;
+    if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 10000) throw LogicError('maxSteps must be an integer between 1 and 10000');
+    var outputNames = new Set();
+    outputs.forEach(function (o) {
+      if (!o || !graph.byName.has(o.node) || graph.byName.get(o.node).outputs.indexOf(o.port) < 0) throw LogicError('output references a missing node or port');
+      var name = o.name || (o.node + '_' + o.port);
+      if (outputNames.has(name)) throw LogicError('duplicate output name: ' + name);
+      outputNames.add(name);
+    });
     vectors.forEach(function (vector, cycleIndex) {
+      if (typeof vector === 'number' && (!Number.isSafeInteger(vector) || vector < 0 || vector >= Math.pow(2, inputs.length))) throw LogicError('numeric input vector is outside the declared input width');
       var inputState = new Map(state);
       inputs.forEach(function (inp, idx) {
         var name = typeof inp === 'string' ? inp : inp.name;
         var v;
         if (typeof vector === 'number') v = (vector >> (inputs.length - 1 - idx)) & 1;
         else if (Array.isArray(vector)) v = vector[idx];
-        else v = vector[name] != null ? vector[name] : (vector[keyOf(name)] != null ? vector[keyOf(name)] : 0);
+        else if (vector && typeof vector === 'object') v = vector[name] != null ? vector[name] : (vector[keyOf(name)] != null ? vector[keyOf(name)] : 0);
+        else throw LogicError('input vector must be a number, array or object');
         if (v === 'x' || v === 'X' || v == null) v = 0;
-        inputState.set('IN:' + name, v ? 1 : 0);
-        inputState.set(name + ':y', v ? 1 : 0);
+        v = Number(v);
+        if (v !== 0 && v !== 1) throw LogicError('input values must be binary');
+        inputState.set('IN:' + name, v);
+        inputState.set('IN:' + name + ':y', v);
       });
       var snapshots = [];
       var settled = false;
@@ -1015,7 +1091,7 @@
         order.forEach(function (node) {
           var args = node.inputs.map(function (w) {
             if (!w) return 0;
-            var key = w.node.indexOf('IN:') === 0 ? w.node.slice(3) + ':y' : w.node + ':' + w.port;
+            var key = w.node + ':' + w.port;
             return values.has(key) ? values.get(key) : 0;
           });
           var result = node.def.fn(args);
@@ -1028,7 +1104,7 @@
         });
         var signature = signatureOf(values, order, dffs);
         snapshots.push(capture(outputs, values, inputState));
-        if (signature === prevValues) { settled = true; break; }
+        if (signature === prevValues || step === 0) { settled = true; break; }
         prevValues = signature;
       }
       if (!settled) {
@@ -1038,7 +1114,7 @@
         hazards.push({ cycle: cycleIndex, type: 'glitch', steps: snapshots.length - 1, message: 'multiple evaluation passes needed to settle' });
       }
       var final = snapshots[snapshots.length - 1];
-      var out = {};
+      var out = Object.create(null);
       outputs.forEach(function (o) {
         var name = o.name || (o.node + '_' + o.port);
         out[name] = final.values[o.node + ':' + o.port] != null ? final.values[o.node + ':' + o.port] : 0;
@@ -1047,7 +1123,7 @@
       var nextState = new Map(state);
       dffs.forEach(function (n) {
         var wire = n.inputs[0];
-        var key = wire ? (wire.node.indexOf('IN:') === 0 ? wire.node.slice(3) + ':y' : wire.node + ':' + wire.port) : null;
+        var key = wire ? wire.node + ':' + wire.port : null;
         var d = key ? (final.allValues[key] || 0) : 0;
         n.outputs.forEach(function (p) { nextState.set(n.id + ':' + p, d ? 1 : 0); });
       });
@@ -1087,9 +1163,9 @@
   }
 
   function capture(outputs, values, inputState) {
-    var inputsObj = {};
+    var inputsObj = Object.create(null);
     inputState.forEach(function (v, k) {
-      if (k.indexOf('IN:') === 0) inputsObj[k.slice(3)] = v;
+      if (k.indexOf('IN:') === 0 && k.indexOf(':y') < 0) inputsObj[k.slice(3)] = v;
     });
     return { inputs: inputsObj, values: Object.fromEntries(values), allValues: Object.fromEntries(values) };
   }
@@ -1117,7 +1193,7 @@
   function sanitizeIdentifier(name, fallback) {
     var s = String(name == null ? '' : name).replace(/[^A-Za-z0-9_]/g, '_');
     if (!s || /^[0-9]/.test(s)) s = (fallback || 'signal') + '_' + s;
-    if (/^(module|endmodule|input|output|wire|reg|always|assign|begin|end|if|else|initial|parameter|integer|posedge|negedge|or|and|not|xor|nand|nor|xnor|case|default|function|endfunction|task|endtask|generate|endgenerate|localparam|inout|tri|supply0|supply1)$/i.test(s)) {
+    if (/^(always|and|assign|automatic|begin|buf|bufif0|bufif1|case|casex|casez|cell|cmos|config|deassign|default|defparam|design|disable|edge|else|end|endcase|endconfig|endfunction|endgenerate|endmodule|endprimitive|endspecify|endtable|endtask|event|for|force|forever|fork|function|generate|genvar|highz0|highz1|if|ifnone|incdir|include|initial|inout|input|instance|integer|join|large|liblist|library|localparam|macromodule|medium|module|nand|negedge|nmos|nor|noshowcancelled|not|notif0|notif1|or|output|parameter|pmos|posedge|primitive|pull0|pull1|pulldown|pullup|pulsestyle_onevent|pulsestyle_ondetect|rcmos|real|realtime|reg|release|repeat|rnmos|rpmos|rtran|rtranif0|rtranif1|scalared|showcancelled|signed|small|specify|specparam|strong0|strong1|supply0|supply1|table|task|time|tran|tranif0|tranif1|tri|tri0|tri1|triand|trior|trireg|unsigned|use|vectored|wait|wand|weak0|weak1|while|wire|wor|xnor|xor)$/i.test(s)) {
       s = 'lg_' + s;
     }
     return s;
@@ -1161,8 +1237,8 @@
     if (!spec || typeof spec !== 'object') throw LogicError('spec must be an object');
     var numVars = spec.numVars;
     var vars = spec.vars;
-    var names = vars ? normalizeVars(vars) : resolveVarNames(numVars || 2);
-    if (!numVars) numVars = names.length;
+    var names = vars ? normalizeVars(vars) : resolveVarNames(numVars == null ? 2 : numVars);
+    if (numVars == null) numVars = names.length;
     if (numVars !== names.length) throw LogicError('numVars must equal vars.length');
     var minterms = spec.minterms;
     if (minterms == null && spec.expr != null) {
@@ -1179,13 +1255,16 @@
     var names = ctx.names;
     var result = ctx.result;
     var moduleName = sanitizeIdentifier(s.moduleName || s.name || 'logicgate_module', 'lg_module');
-    var form = String(s.form || 'SOP').toUpperCase() === 'POS' ? 'POS' : 'SOP';
+    var form = String(s.form || 'SOP').toUpperCase();
+    if (form !== 'SOP' && form !== 'POS') throw LogicError('form must be SOP or POS');
     var solution = form === 'POS' ? result.pos : result.sop;
     var vNames = uniqueNames(names, 'in');
-    var varMap = {};
+    var varMap = Object.create(null);
     names.forEach(function (n, i) { varMap[n] = vNames[i]; });
     var outName = sanitizeIdentifier(s.outputName || 'y', 'lg_out');
-    if (vNames.indexOf(outName) >= 0) outName = 'lg_' + outName;
+    var outputBase = outName;
+    var outputSuffix = 1;
+    while (vNames.indexOf(outName) >= 0) outName = outputBase + '_' + outputSuffix++;
     var lines = [];
     lines.push('`timescale 1ns/1ps');
     lines.push('// LogicGate generated synthesizable Verilog-2001 module');
@@ -1228,6 +1307,19 @@
     var module = lines.join('\n') + '\n';
 
     var tbName = moduleName + '_tb';
+    var localNames = new Set([outName, moduleName, tbName]);
+    function localName(base) {
+      var name = base, suffix = 1;
+      while (localNames.has(name)) name = base + '_' + suffix++;
+      localNames.add(name);
+      return name;
+    }
+    var stimulusName = localName('stimulus');
+    var errorsName = localName('errors');
+    var indexName = localName('i');
+    var expectedName = localName('expected');
+    var careFunctionName = localName('is_dont_care');
+    var instanceName = localName('dut');
     var tb = [];
     var size = 1 << ctx.numVars;
     tb.push('// LogicGate generated self-checking testbench');
@@ -1235,42 +1327,42 @@
     tb.push('`timescale 1ns/1ps');
     tb.push('`default_nettype none');
     tb.push('module ' + tbName + ';');
-    tb.push('    reg  [' + (ctx.numVars - 1) + ':0] stimulus;');
+    tb.push('    reg  [' + (ctx.numVars - 1) + ':0] ' + stimulusName + ';');
     tb.push('    wire ' + outName + ';');
-    tb.push('    integer errors;');
-    tb.push('    integer i;');
-    tb.push('    reg expected;');
+    tb.push('    integer ' + errorsName + ';');
+    tb.push('    integer ' + indexName + ';');
+    tb.push('    reg ' + expectedName + ';');
     tb.push('');
-    tb.push('    ' + moduleName + ' dut (');
-    tb.push('        ' + vNames.map(function (v, i) { return '.' + v + '(stimulus[' + (ctx.numVars - 1 - i) + '])'; }).concat(['.' + outName + '(' + outName + ')']).join(',\n        '));
+    tb.push('    ' + moduleName + ' ' + instanceName + ' (');
+    tb.push('        ' + vNames.map(function (v, i) { return '.' + v + '(' + stimulusName + '[' + (ctx.numVars - 1 - i) + '])'; }).concat(['.' + outName + '(' + outName + ')']).join(',\n        '));
     tb.push('    );');
     tb.push('');
-    tb.push('    function is_dont_care;');
+    tb.push('    function ' + careFunctionName + ';');
     tb.push('        input [' + (ctx.numVars - 1) + ':0] s;');
     tb.push('        begin');
-    tb.push('            is_dont_care = ' + buildExpectedFunction({ minterms: result.dontCares }, ctx.numVars, true) + ';');
+    tb.push('            ' + careFunctionName + ' = ' + buildExpectedFunction({ minterms: result.dontCares }, ctx.numVars, true) + ';');
     tb.push('        end');
     tb.push('    endfunction');
     tb.push('');
     tb.push('    initial begin');
-    tb.push('        errors = 0;');
-    tb.push('        for (i = 0; i < ' + size + '; i = i + 1) begin');
-    tb.push('            stimulus = i[' + (ctx.numVars - 1) + ':0];');
+    tb.push('        ' + errorsName + ' = 0;');
+    tb.push('        for (' + indexName + ' = 0; ' + indexName + ' < ' + size + '; ' + indexName + ' = ' + indexName + ' + 1) begin');
+    tb.push('            ' + stimulusName + ' = ' + indexName + '[' + (ctx.numVars - 1) + ':0];');
     tb.push('            #1;');
-    tb.push('            expected = ' + buildExpectedFunction(result, ctx.numVars) + ';');
-    tb.push('            if (is_dont_care(stimulus)) begin');
-    tb.push('                $display("DONT CARE %0d: %b", i, ' + outName + ');');
+    tb.push('            ' + expectedName + ' = ' + buildExpectedFunction(result, ctx.numVars, false, stimulusName) + ';');
+    tb.push('            if (' + careFunctionName + '(' + stimulusName + ')) begin');
+    tb.push('                $display("DONT CARE %0d: %b", ' + indexName + ', ' + outName + ');');
     tb.push('            end');
-    tb.push('            else if (' + outName + ' !== expected) begin');
-    tb.push('                $display("FAIL %0d: got %b expected %b", i, ' + outName + ', expected);');
-    tb.push('                errors = errors + 1;');
+    tb.push('            else if (' + outName + ' !== ' + expectedName + ') begin');
+    tb.push('                $display("FAIL %0d: got %b expected %b", ' + indexName + ', ' + outName + ', ' + expectedName + ');');
+    tb.push('                ' + errorsName + ' = ' + errorsName + ' + 1;');
     tb.push('            end');
     tb.push('            else begin');
-    tb.push('                $display("PASS %0d: %b", i, ' + outName + ');');
+    tb.push('                $display("PASS %0d: %b", ' + indexName + ', ' + outName + ');');
     tb.push('            end');
     tb.push('        end');
-    tb.push('        if (errors == 0) $display("ALL ' + size + ' VECTORS PASS");');
-    tb.push('        else $display("%0d VECTORS FAILED", errors);');
+    tb.push('        if (' + errorsName + ' == 0) $display("ALL ' + size + ' VECTORS PASS");');
+    tb.push('        else $display("%0d VECTORS FAILED", ' + errorsName + ');');
     tb.push('        $finish;');
     tb.push('    end');
     tb.push('');
@@ -1294,17 +1386,53 @@
       vectorCount: size,
       truthTable: result.truthTable,
       dontCares: result.dontCares,
-      spec: { numVars: ctx.numVars, vars: names, minterms: result.minterms }
+      inputNames: vNames,
+      outputName: outName,
+      spec: { numVars: ctx.numVars, vars: names, minterms: result.minterms, dontCares: result.dontCares, form: form }
     };
   }
 
-  function buildExpectedFunction(result, numVars, forDontCare) {
+  function buildExpectedFunction(result, numVars, forDontCare, stimulusName) {
     var terms = [];
     result.minterms.forEach(function (m) {
-      terms.push('(' + (forDontCare ? 's' : 'stimulus') + ' == ' + numVars + "'d" + m + ')');
+      terms.push('(' + (forDontCare ? 's' : (stimulusName || 'stimulus')) + ' == ' + numVars + "'d" + m + ')');
     });
     if (terms.length === 0) return "1'b0";
     return '(' + terms.join(' || ') + ')';
+  }
+
+  /* Read the emitted RTL back into the parser and verify every care vector. */
+  function verifyVerilog(bundle) {
+    if (!bundle || typeof bundle.module !== 'string' || !bundle.spec) throw LogicError('a Verilog export bundle is required');
+    var source = bundle.module.replace(/\/\/[^\n]*/g, '');
+    var assignments = Array.from(source.matchAll(/\bassign\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/g));
+    var inputs = Array.from(source.matchAll(/\binput\s+wire\s+([A-Za-z_][A-Za-z0-9_]*)/g)).map(function (m) { return m[1]; });
+    var output = /\boutput\s+wire\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(source);
+    if (assignments.length !== 1 || !output || assignments[0][1] !== output[1] || inputs.length !== bundle.spec.numVars) throw LogicError('unsupported or malformed continuous-assignment Verilog');
+    var expression = assignments[0][2].replace(/1'b([01])/g, '$1');
+    var table = evalTruthTable(expression, inputs);
+    var expected = fromMinterms(bundle.spec.numVars, bundle.spec.minterms, bundle.spec.dontCares);
+    var failures = [];
+    var checked = 0;
+    expected.outputs.forEach(function (value, vector) {
+      if (!expected.care[vector]) return;
+      checked++;
+      if (table.outputs[vector] !== value) failures.push({ vector: vector, expected: value, actual: table.outputs[vector] });
+    });
+    return { passes: failures.length === 0, checked: checked, total: table.outputs.length, failures: failures, outputs: table.outputs };
+  }
+
+  function exportVerificationJSON(spec) {
+    var ctx = buildSpec(spec);
+    var bundle = exportVerilog(spec);
+    return JSON.stringify({
+      format: 'logicgate-verification', version: 1,
+      specification: bundle.spec,
+      synthesis: { sop: ctx.result.sop, pos: ctx.result.pos },
+      verification: { sop: ctx.result.verification.sopMatchesCareInputs, pos: ctx.result.verification.posMatchesCareInputs, rtl: verifyVerilog(bundle) },
+      staticHazards: ctx.result.hazards,
+      timingModel: 'Balanced two-input gates at an illustrative 2 ns per level'
+    }, null, 2) + '\n';
   }
 
   /* ------------------------------------------------------------------ *
@@ -1321,6 +1449,8 @@
   }
 
   var PRESETS = {
+    cyclicCover: preset('cyclicCover', 'Exact cover challenge', 'Six care states, zero essential primes. An exact three-cube cover resolves the cyclic chart.', 4, ['A', 'B', 'C', 'D'], [1, 2, 3, 4, 5, 6], [], null, { moduleName: 'cyclic_cover', outputName: 'covered' }),
+    staticHazard: preset('staticHazard', 'Hazard detective', 'The A transition at B=C=1 exposes a static-1 hazard. Inspect the missing B & C consensus term.', 3, ['A', 'B', 'C'], [1, 3, 6, 7], [], 'A & B | !A & C', { moduleName: 'hazard_case', outputName: 'F' }),
     sevenSegmentDecoder: preset(
       'sevenSegmentDecoder', 'Seven segment decoder',
       'Segment a of a BCD to seven segment display. States 10 to 15 are don\'t cares.',
@@ -1377,26 +1507,36 @@
   }
 
   function carryLookaheadNetlist() {
+    var nodes = [], edges = [];
+    function gate(id, type, a, b) {
+      nodes.push({ id: id, type: type });
+      edges.push({ from: a, to: id, toPort: 0 });
+      edges.push({ from: b, to: id, toPort: 1 });
+      return id;
+    }
+    for (var i = 0; i < 4; i++) {
+      gate('p' + i, 'XOR', 'IN:A' + i, 'IN:B' + i);
+      gate('g' + i, 'AND', 'IN:A' + i, 'IN:B' + i);
+    }
+    var p32 = gate('p32', 'AND', 'p3', 'p2');
+    var p321 = gate('p321', 'AND', p32, 'p1');
+    var p3210 = gate('p3210', 'AND', p321, 'p0');
+    var t2 = gate('t2', 'AND', 'p3', 'g2');
+    var t1 = gate('t1', 'AND', p32, 'g1');
+    var t0 = gate('t0', 'AND', p321, 'g0');
+    var tc = gate('tc', 'AND', p3210, 'IN:CIN');
+    var s32 = gate('s32', 'OR', 'g3', t2);
+    var s10 = gate('s10', 'OR', t1, t0);
+    var s = gate('s', 'OR', s32, s10);
+    gate('C4', 'OR', s, tc);
     return {
       inputs: ['A0', 'B0', 'A1', 'B1', 'A2', 'B2', 'A3', 'B3', 'CIN'],
-      outputs: [{ node: 'fa3', port: 'carry', name: 'C4' }],
-      nodes: [
-        { id: 'fa0', type: 'FULL_ADDER' },
-        { id: 'fa1', type: 'FULL_ADDER' },
-        { id: 'fa2', type: 'FULL_ADDER' },
-        { id: 'fa3', type: 'FULL_ADDER' }
-      ],
-      edges: [
-        { from: 'IN:A0', to: 'fa0', toPort: 0 }, { from: 'IN:B0', to: 'fa0', toPort: 1 }, { from: 'IN:CIN', to: 'fa0', toPort: 2 },
-        { from: 'IN:A1', to: 'fa1', toPort: 0 }, { from: 'IN:B1', to: 'fa1', toPort: 1 }, { from: 'fa0', fromPort: 'carry', to: 'fa1', toPort: 2 },
-        { from: 'IN:A2', to: 'fa2', toPort: 0 }, { from: 'IN:B2', to: 'fa2', toPort: 1 }, { from: 'fa1', fromPort: 'carry', to: 'fa2', toPort: 2 },
-        { from: 'IN:A3', to: 'fa3', toPort: 0 }, { from: 'IN:B3', to: 'fa3', toPort: 1 }, { from: 'fa2', fromPort: 'carry', to: 'fa3', toPort: 2 }
-      ]
+      outputs: [{ node: 'C4', port: 'y', name: 'C4' }], nodes: nodes, edges: edges
     };
   }
 
   function getPreset(name) {
-    if (!PRESETS[name]) throw LogicError('unknown preset: ' + name);
+    if (!Object.prototype.hasOwnProperty.call(PRESETS, name)) throw LogicError('unknown preset: ' + name);
     return JSON.parse(JSON.stringify(PRESETS[name]));
   }
 
@@ -1437,7 +1577,7 @@
    * ------------------------------------------------------------------ */
 
   return {
-    version: '1.0.0',
+    version: '2.0.0',
     MAX_VARS: MAX_VARS,
     LogicError: LogicError,
     parseExpr: parseExpr,
@@ -1450,6 +1590,8 @@
     simulateNetlist: simulateNetlist,
     detectCycles: detectCycles,
     exportVerilog: exportVerilog,
+    verifyVerilog: verifyVerilog,
+    exportVerificationJSON: exportVerificationJSON,
     presets: PRESETS,
     getPreset: getPreset,
     listPresets: listPresets,

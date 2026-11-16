@@ -13,7 +13,7 @@
     dontCares: [10, 11, 12, 13, 14, 15],
     form: 'SOP',
     moduleName: 'logicgate_module',
-    preset: '',
+    preset: 'sevenSegmentDecoder',
     showGroups: true,
     showTexture: false,
     highlight: true,
@@ -21,6 +21,8 @@
     verilog: null,
     netlistResult: null
   };
+  state.probe = 0;
+  state.rtlCheck = null;
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {};
@@ -30,7 +32,8 @@
     'statRow', 'kmapWrap', 'showGroups', 'showTexture', 'kmapLegend', 'solutionBlock',
     'primeList', 'groupLegend', 'groupSvg', 'groupTable', 'truthTable', 'ttToggle',
     'schematicSvg', 'waveformSvg', 'copyModule', 'copyTb', 'downloadModule', 'downloadTb',
-    'moduleFilename', 'tbFilename', 'moduleCode', 'tbCode', 'exportStatus', 'toast', 'varCountLabel'
+    'moduleFilename', 'tbFilename', 'moduleCode', 'tbCode', 'exportStatus', 'toast', 'varCountLabel',
+    'verificationBadges', 'downloadProof', 'probeInputs', 'probeReadout', 'probeVector', 'hazardReadout'
   ].forEach(function (id) { el[id] = $(id); });
 
   function esc(text) {
@@ -73,31 +76,15 @@
 
   /* ---------------- State and input parsing ---------------- */
 
-  function parseList(text, limit) {
-    var out = [];
-    String(text || '').split(/[\s,;]+/).forEach(function (piece) {
-      if (!piece || /^[-xX]$/i.test(piece)) return;
-      var n = Number(piece);
-      if (Number.isInteger(n) && n >= 0 && n < limit && out.indexOf(n) < 0) out.push(n);
-    });
-    return out.sort(function (a, b) { return a - b; });
-  }
-
   function readVars() {
     var raw = el.varNames.value.split(/[\s,;]+/).filter(Boolean);
-    var cleaned = [];
-    raw.forEach(function (v) {
-      var name = v.replace(/[^A-Za-z0-9_]/g, '_');
-      if (/^[A-Za-z_]/.test(name) && cleaned.indexOf(name) < 0) cleaned.push(name);
-    });
-    for (var i = 0; cleaned.length < state.numVars; i += 1) {
-      var candidate = String.fromCharCode(65 + i);
-      if (cleaned.indexOf(candidate) < 0) cleaned.push(candidate);
-    }
-    return cleaned.slice(0, state.numVars);
+    if (raw.length !== state.numVars) throw new Error('Enter exactly ' + state.numVars + ' input names.');
+    LG.evalTruthTable('0', raw);
+    return raw;
   }
 
   function syncInputs() {
+    [el.varNames, el.exprInput, el.mintermInput, el.dontCareInput, el.moduleNameInput].forEach(function (node) { node.removeAttribute('aria-invalid'); });
     el.varCount.value = String(state.numVars);
     el.varCountLabel.textContent = state.numVars + ' variables';
     el.varNames.value = state.vars.join(', ');
@@ -118,16 +105,23 @@
 
   function recompute() {
     try {
-      state.result = LG.minimizeBoolean(state.numVars, state.minterms, state.dontCares, { vars: state.vars });
+      if ([el.varNames, el.exprInput, el.mintermInput, el.dontCareInput].some(function (node) { return node.getAttribute('aria-invalid') === 'true'; })) throw new Error('Resolve the highlighted input before exporting.');
+      var result = LG.minimizeBoolean(state.numVars, state.minterms, state.dontCares, { vars: state.vars });
       var preset = state.preset ? LG.getPreset(state.preset) : null;
-      state.verilog = LG.exportVerilog({
+      var verilog = LG.exportVerilog({
         numVars: state.numVars, vars: state.vars, minterms: state.minterms,
         dontCares: state.dontCares, form: state.form, moduleName: state.moduleName,
         outputName: preset ? preset.outputName : 'y'
       });
+      state.rtlCheck = LG.verifyVerilog(verilog);
+      state.result = result;
+      state.verilog = verilog;
+      setExportEnabled(true);
       renderAll();
+      return true;
     } catch (err) {
-      setStatus(el.exprStatus, err.message, 'error');
+      inputError(null, err);
+      return false;
     }
   }
 
@@ -143,6 +137,53 @@
     renderSchematic(r);
     renderWaveform(r);
     renderExport(state.verilog);
+    renderProof();
+    renderProbe();
+  }
+
+  function setExportEnabled(enabled) {
+    [el.copyModule, el.copyTb, el.downloadModule, el.downloadTb, el.downloadProof].forEach(function (node) { node.disabled = !enabled; });
+  }
+
+  function inputError(field, error) {
+    if (field) field.setAttribute('aria-invalid', 'true');
+    setStatus(el.exprStatus, error.message, 'error');
+    setExportEnabled(false);
+    el.verificationBadges.textContent = 'Resolve the input error to verify this specification.';
+  }
+
+  function renderProof() {
+    var r = state.result;
+    var checked = state.rtlCheck.checked;
+    var badges = [['SOP', r.verification.sopMatchesCareInputs], ['POS', r.verification.posMatchesCareInputs], ['RTL round trip', state.rtlCheck.passes]];
+    el.verificationBadges.innerHTML = badges.map(function (item) { return '<span class="proof-badge' + (item[1] ? ' is-pass' : ' is-fail') + '">' + esc(item[0]) + ': ' + (item[1] ? 'PASS' : 'FAIL') + '</span>'; }).join('') + '<span class="proof-count">' + checked + ' / ' + (1 << state.numVars) + ' care states checked</span>';
+  }
+
+  function renderProbe() {
+    state.probe = state.probe & ((1 << state.numVars) - 1);
+    el.probeInputs.innerHTML = state.vars.map(function (name, index) {
+      var value = (state.probe >> (state.numVars - 1 - index)) & 1;
+      return '<button type="button" class="signal-toggle" data-input="' + index + '" aria-pressed="' + !!value + '">' + esc(name) + '<strong>' + value + '</strong></button>';
+    }).join('');
+    updateProbeReadout();
+  }
+
+  function updateProbeReadout() {
+    var r = state.result, vector = state.probe;
+    el.probeVector.textContent = 'Vector ' + vector + ' / ' + vector.toString(2).padStart(state.numVars, '0');
+    var expected = state.dontCares.indexOf(vector) >= 0 ? 'X (unconstrained)' : r.truthTable[vector];
+    el.probeReadout.textContent = 'F = ' + expected + '   |   SOP = ' + r.verification.sopOutputs[vector] + '   |   POS = ' + r.verification.posOutputs[vector] + '   |   exported RTL = ' + state.rtlCheck.outputs[vector];
+    var hazards = state.form === 'POS' ? r.hazards.pos : r.hazards.sop;
+    el.hazardReadout.textContent = hazards.length ? hazards.length + ' potential ' + hazards[0].type + ' transition(s). m' + hazards[0].from + ' to m' + hazards[0].to + ' changes ' + hazards[0].variable + '; consensus: ' + hazards[0].consensus + '. Gate delay differences can create a pulse.' : 'All adjacent care pairs share a cube in the active form. Static hazard check passes; dynamic timing is not simulated.';
+    el.hazardReadout.className = 'field-note' + (hazards.length ? ' is-warning' : ' is-ok');
+    el.kmapWrap.querySelectorAll('.kmap-cell').forEach(function (node) { node.classList.toggle('is-probed', Number(node.dataset.minterm) === vector); });
+  }
+
+  function inspectVector(vector) {
+    if (!Number.isInteger(vector) || vector < 0 || vector >= (1 << state.numVars)) return;
+    state.probe = vector;
+    renderProbe();
+    renderSchematic(state.result);
   }
 
   /* ---------------- Stat tiles ---------------- */
@@ -150,11 +191,11 @@
   function renderStats(r) {
     var sol = state.form === 'POS' ? r.pos : r.sop;
     var tiles = [
-      { label: 'Prime Implicants', value: r.primeImplicants.length, detail: r.essentialPrimeImplicants.length + ' essential' },
+      { label: 'Prime cubes', value: (state.form === 'POS' ? r.posPrimeImplicants : r.primeImplicants).length, detail: (state.form === 'POS' ? r.posEssentialPrimeImplicants : r.essentialPrimeImplicants).length + ' essential' },
       { label: 'SOP Cost', value: r.sop.termCount + ' terms', detail: r.sop.literalCount + ' literals' },
       { label: 'POS Cost', value: r.pos.termCount + ' sums', detail: r.pos.literalCount + ' literals' },
       { label: 'Gate Count', value: sol.gateCount.total, detail: sol.gateCount.not + ' INV, ' + (sol.gateCount.and + sol.gateCount.or) + ' logic' },
-      { label: 'Critical Path Delay', value: sol.propagationDelay.estimate + ' ns', detail: sol.propagationDelay.levels + ' levels @ 2.0 ns' },
+      { label: 'Logic depth', value: sol.propagationDelay.levels, detail: 'balanced two-input gate model' },
       { label: 'On / Don\'t-Care', value: r.minterms.length + ' / ' + (1 << r.numVars), detail: r.dontCares.length + ' X states' }
     ];
     el.statRow.innerHTML = tiles.map(function (t) {
@@ -249,17 +290,17 @@
     var rec = r.metrics.sopVsPos.recommended;
     function card(kicker, sol, name, badge) {
       return '<div class="expr-card"><div class="kicker"><span>' + esc(kicker) + ' (' + name + ')</span>' +
-        (badge ? '<span class="badge ' + (name === rec ? 'recommended' : '') + '">' + esc(badge) + '</span>' : '') + '</div>' +
+        '<span class="badge ' + (name === rec ? 'recommended' : '') + '">' + (name === state.form ? 'ACTIVE' : name === rec ? 'LOWER GATE COST' : 'VERIFIED') + '</span></div>' +
         '<div class="formula">' + esc(sol.expression) + '</div>' +
         '<div class="meta">' + sol.termCount + ' terms, ' + sol.literalCount + ' literals, ' +
-        sol.gateCount.total + ' gates, ' + sol.propagationDelay.estimate + ' ns critical path</div></div>';
+        sol.gateCount.total + ' two-input gates, depth ' + sol.propagationDelay.levels + '</div></div>';
     }
     el.solutionBlock.innerHTML = card('Minimal Sum of Products', r.sop, 'SOP', 'Active: ' + state.form) +
       card('Minimal Product of Sums', r.pos, 'POS', '') +
       '<div class="expr-card"><div class="kicker"><span>Gate Cost Comparison</span></div>' +
       '<div class="formula">Preferred Two-Level Form: ' + esc(rec) + '</div><div class="meta">' +
       r.metrics.sopVsPos.sopGates + ' gates (SOP) vs. ' + r.metrics.sopVsPos.posGates +
-      ' gates (POS). Don\'t-care cells are assigned only when they enlarge prime cubes.</div></div>';
+      ' gates (POS). Delay estimates describe a balanced gate model before device mapping.</div></div>';
   }
 
   function renderPrimes(r) {
@@ -444,6 +485,7 @@
     var isPOS = state.form === 'POS';
     var cubes = sol.implicants;
     var inputs = state.vars;
+    var probeValue = (state.form === 'POS' ? r.verification.posOutputs : r.verification.sopOutputs)[state.probe];
     var inv = new Set();
     cubes.forEach(function (cube) {
       inputs.forEach(function (_, i) {
@@ -461,6 +503,22 @@
     var w = outX + 76;
     var root = makeSvg(w, h, 'Gate level schematic of ' + state.form + ' implementation');
 
+    if (sol.literalCount === 0 || (sol.termCount === 1 && sol.literalCount === 1)) {
+      root.setAttribute('viewBox', '0 0 ' + w + ' 110'); root.setAttribute('height', '110');
+      var product = sol.products[0] || sol.expression;
+      var inverted = product.charAt(0) === '!';
+      var inputName = inverted ? product.slice(1) : product;
+      root.appendChild(svg('text', { x: 16, y: 22, 'font-size': 12, class: 'secondary' }, sol.literalCount === 0 ? 'Constant function' : inverted ? 'One shared inverter' : 'Direct wire, zero logic gates'));
+      root.appendChild(svg('text', { x: 60, y: 63, 'font-size': 13, class: 'mono-label' }, inputName));
+      root.appendChild(svg('line', { x1: 140, y1: 58, x2: 440, y2: 58, stroke: cssVar('--accent'), 'stroke-width': 2 }));
+      if (inverted) {
+        root.appendChild(svg('rect', { x: 250, y: 43, width: 70, height: 30, fill: cssVar('--surface-1'), stroke: cssVar('--accent') }));
+        root.appendChild(svg('text', { x: 285, y: 62, 'text-anchor': 'middle', 'font-size': 12 }, 'INV'));
+      }
+      root.appendChild(svg('text', { x: 450, y: 63, 'font-size': 13, class: 'mono-label' }, 'F = ' + probeValue));
+      replace(el.schematicSvg, root); return;
+    }
+
     root.appendChild(svg('text', { x: 12, y: 18, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
       (isPOS ? 'Two-Level OR-AND Network' : 'Two-Level AND-OR Network') + ' (' + cubeDescription(cubes.length) + ')' +
       (cubes.length > MAX_GROUPS ? ' [first ' + MAX_GROUPS + ' shown]' : '')));
@@ -471,7 +529,7 @@
     inputs.forEach(function (name, i) {
       var y = top + laneIndex * laneH;
       laneY['p' + i] = y;
-      root.appendChild(svg('text', { x: 8, y: y + 4, 'font-size': 11, class: 'mono-label', 'font-weight': 700 }, name));
+      root.appendChild(svg('text', { x: 8, y: y + 4, 'font-size': 11, class: 'mono-label', 'font-weight': 700 }, name + ' = ' + ((state.probe >> (state.numVars - 1 - i)) & 1)));
       root.appendChild(svg('line', { x1: railX, y1: y, x2: gateX + 24, y2: y, stroke: cssVar('--border'), 'stroke-width': 1.4 }));
       root.appendChild(svg('rect', { x: railX - 2, y: y - 2, width: 4, height: 4, fill: cssVar('--accent') }));
       laneIndex += 1;
@@ -492,7 +550,8 @@
     var gateBlockH = Math.max(cubes.length, 1) * (gateH + gateGap);
     var firstGateY = gateY;
     cubes.forEach(function (cube, gi) {
-      var color = groupColor(gi);
+      var active = ((state.probe & cube.mask) === cube.value) !== isPOS;
+      var color = active ? groupColor(gi) : cssVar('--border');
       var gy = firstGateY + gi * (gateH + gateGap);
       var lits = [];
       inputs.forEach(function (_, i) {
@@ -514,20 +573,22 @@
         root.appendChild(svg('path', { d: 'M ' + ex + ' ' + sy + ' V ' + gy, fill: 'none', stroke: color, 'stroke-width': 1.3 }));
         root.appendChild(svg('circle', { cx: ex, cy: sy, r: 2.2, fill: color }));
       });
-      root.appendChild(svg('path', { d: 'M ' + (gx + gw) + ' ' + (gy + gateH / 2) + ' H ' + (outerX - 22) + ' V ' + (firstGateY + gateBlockH / 2), fill: 'none', stroke: cssVar('--border-strong'), 'stroke-width': 1.4 }));
+      root.appendChild(svg('path', { d: cubes.length === 1 ? 'M ' + (gx + gw) + ' ' + (gy + gateH / 2) + ' H ' + outX : 'M ' + (gx + gw) + ' ' + (gy + gateH / 2) + ' H ' + (outerX - 22) + ' V ' + (firstGateY + gateBlockH / 2), fill: 'none', stroke: cssVar('--border-strong'), 'stroke-width': 1.4 }));
       root.appendChild(svg('text', { x: gateX - 10, y: gy + gateH / 2 + 4, 'text-anchor': 'end', 'font-size': 10, class: 'mono-label muted' }, sol.terms[gi] || ''));
     });
     if (!cubes.length) {
       root.appendChild(svg('text', { x: gateX, y: gateY + 20, 'font-size': 11.5, class: 'muted' }, 'Constant ' + sol.expression + ' (0 logic gates)'));
+    } else if (cubes.length === 1) {
+      root.appendChild(svg('text', { x: outX + 6, y: firstGateY + gateH / 2 + 4, 'font-size': 11.5, 'font-weight': 700, class: 'mono-label' }, 'F = ' + probeValue));
     } else {
       var oy = firstGateY + gateBlockH / 2 - 20;
       root.appendChild(svg('rect', { x: outerX - 22, y: oy, width: 94, height: 40, fill: cssVar('--surface-1'), stroke: cssVar('--accent'), 'stroke-width': 2 }));
       root.appendChild(svg('text', { x: outerX + 25, y: oy + 24, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 700, class: 'mono-label' }, isPOS ? 'AND_OUT' : 'OR_OUT'));
       root.appendChild(svg('path', { d: 'M ' + (outerX + 72) + ' ' + (oy + 20) + ' H ' + outX, fill: 'none', stroke: cssVar('--accent'), 'stroke-width': 2 }));
-      root.appendChild(svg('text', { x: outX + 6, y: oy + 24, 'font-size': 11.5, 'font-weight': 700, class: 'mono-label' }, 'F'));
+      root.appendChild(svg('text', { x: outX + 6, y: oy + 24, 'font-size': 11.5, 'font-weight': 700, class: 'mono-label' }, 'F = ' + probeValue));
     }
     root.appendChild(svg('text', { x: 12, y: h - 10, 'font-size': 10, class: 'muted' },
-      'Propagation path: ' + sol.propagationDelay.levels + ' gate levels (' + sol.propagationDelay.estimate + ' ns nominal).'));
+      'Depth: ' + sol.propagationDelay.levels + ' balanced gate levels. Timing is an illustrative model.'));
     replace(el.schematicSvg, root);
   }
 
@@ -567,7 +628,7 @@
     var w = x0 + indices.length * step + 26;
     var root = makeSvg(w, h, 'Timing waveform for all input combinations');
     root.appendChild(svg('text', { x: 10, y: 17, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
-      'HP Logic State Analyzer Trace (' + indices.length + ' of ' + size + ' vectors)'));
+      'State waveform (' + indices.length + ' of ' + size + ' vectors)'));
     indices.forEach(function (idx, ci) {
       var vx = x0 + ci * step;
       root.appendChild(svg('line', { x1: vx, y1: top - 4, x2: vx, y2: h - 18, stroke: cssVar('--border-soft'), 'stroke-width': 1 }));
@@ -597,6 +658,11 @@
       var lastV = sig.values[indices[indices.length - 1]];
       drawMarker(root, x0 + (indices.length - 1) * step, yFor(lastV), lastV, sig.color);
     });
+    indices.forEach(function (vector, index) {
+      var hit = svg('rect', { x: x0 + index * step, y: top, width: step, height: h - top - 18, fill: 'transparent', 'data-vector': vector, tabindex: '0', role: 'button', 'aria-label': 'Inspect vector ' + vector, class: 'wave-hit' });
+      svgTitle(hit, 'Vector ' + vector + ': F = ' + outValues[vector]);
+      root.appendChild(hit);
+    });
     replace(el.waveformSvg, root);
   }
 
@@ -615,7 +681,7 @@
     el.tbFilename.textContent = v.testbenchFilename;
     el.moduleCode.textContent = v.module;
     el.tbCode.textContent = v.testbench;
-    setStatus(el.exportStatus, v.vectorCount + ' testbench vectors generated. Verify with: iverilog -g2001 -o sim.vvp ' +
+    setStatus(el.exportStatus, state.rtlCheck.checked + ' care states pass the RTL round trip. Run the testbench with: iverilog -g2001 -o sim.vvp ' +
       v.filename + ' ' + v.testbenchFilename + ' && vvp sim.vvp', '');
   }
 
@@ -640,7 +706,7 @@
     ta.value = text; ta.setAttribute('readonly', '');
     ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); toast(label + ' copied'); }
+    try { if (!document.execCommand('copy')) throw new Error('Copy unavailable'); toast(label + ' copied'); }
     catch (err) { toast('Copy unavailable, select the code manually'); }
     ta.remove();
   }
@@ -659,8 +725,12 @@
     state.minterms.sort(function (a, b) { return a - b; });
     state.dontCares.sort(function (a, b) { return a - b; });
     state.preset = '';
+    state.netlistResult = null;
+    state.probe = m;
     syncInputs();
     recompute();
+    var replacement = el.kmapWrap.querySelector('[data-minterm="' + m + '"]');
+    if (replacement) replacement.focus();
   }
 
   function applyExpression() {
@@ -671,16 +741,17 @@
       state.minterms = tt.minterms.slice();
       state.dontCares = [];
       state.preset = '';
+      state.netlistResult = null;
       syncInputs();
       recompute();
       setStatus(el.exprStatus, 'Evaluated ' + tt.minterms.length + ' on-set minterms from: ' + src, 'ok');
     } catch (err) {
-      setStatus(el.exprStatus, err.message, 'error');
+      inputError(el.exprInput, err);
     }
   }
 
   function loadPreset(id) {
-    if (!id) { state.preset = ''; syncInputs(); recompute(); return; }
+    if (!id) { state.preset = ''; state.netlistResult = null; syncInputs(); recompute(); return; }
     var p = LG.getPreset(id);
     var supported = p.numVars >= 2 && p.numVars <= 4;
     state.preset = id;
@@ -695,24 +766,27 @@
       state.vars = ['A3', 'B3', 'A2', 'B2'];
       var table = LG.presetTruthTable(id);
       for (var m = 0; m < 16; m += 1) {
-        var vector = (1 << 7) | (1 << 6) | (1 << 5) | (1 << 4) |
-          (((m >> 3) & 1) << 1) | (((m >> 2) & 1) << 0) |
-          (((m >> 1) & 1) << 3) | ((m & 1) << 2);
+        var vector = (1 << 8) | (1 << 7) | (1 << 6) | (1 << 5) |
+          (((m >> 3) & 1) << 2) | (((m >> 2) & 1) << 1) |
+          (((m >> 1) & 1) << 4) | ((m & 1) << 3);
         if (table[vector]) minterms.push(m);
       }
-      note = 'Loaded ' + p.label + '. Karnaugh map shows four upper bits with low carry chain high; run netlist sweep for 512 vectors.';
+      note = 'Four-input slice: A3, B3, A2, B2 with C2=1. Export is the upper slice. The full lookahead netlist checks all 512 vectors.';
     }
     if (!minterms.length && p.expr) {
       minterms = LG.evalTruthTable(p.expr, state.vars).minterms;
     }
     state.minterms = minterms;
     state.dontCares = p.dontCares.slice();
-    state.moduleName = p.moduleName || 'logicgate_module';
+    state.moduleName = (p.moduleName || 'logicgate_module') + (p.numVars > 4 ? '_upper_slice' : '');
     state.netlistResult = null;
+    state.probe = 0;
+    el.exprInput.value = p.numVars > 4 ? '' : (p.expr || '');
     syncInputs();
     recompute();
     setStatus(el.exprStatus, note, 'ok');
     setStatus(el.netlistStatus, '', '');
+    if (p.netlist) runNetlist();
   }
 
   function runNetlist() {
@@ -720,14 +794,17 @@
     if (!p || !p.netlist) return;
     var vectors = [];
     var numInputs = p.netlist.inputs.length;
-    var count = Math.min(1 << numInputs, 256);
+    var count = Math.min(1 << numInputs, 65536);
     for (var m = 0; m < count; m += 1) vectors.push(m);
     try {
       state.netlistResult = LG.simulateNetlist(p.netlist, vectors);
+      var expected = LG.presetTruthTable(state.preset);
+      var outputName = state.netlistResult.outputs[0];
+      var matches = state.netlistResult.cycles.every(function (cycle, vector) { return cycle.outputs[outputName] === expected[vector]; });
       var outputs = state.netlistResult.outputs.join(', ');
       setStatus(el.netlistStatus, 'Simulated ' + count + ' vectors. Outputs: ' + outputs + '. Hazards: ' +
-        state.netlistResult.hazards.length + '.', 'ok');
-      renderWaveform(state.result);
+        state.netlistResult.hazards.length + '. Arithmetic oracle: ' + (matches ? 'PASS' : 'FAIL') + '.', matches ? 'ok' : 'error');
+      if (p.numVars <= 4) renderWaveform(state.result);
       toast('Netlist sweep completed');
     } catch (err) {
       setStatus(el.netlistStatus, err.message, 'error');
@@ -740,7 +817,10 @@
     state.numVars = n;
     var defaults = ['A', 'B', 'C', 'D'].slice(0, n);
     var old = state.vars.slice(0, n);
-    while (old.length < n) old.push(defaults[old.length]);
+    for (var index = 0; old.length < n; index++) {
+      var candidate = defaults[index];
+      if (!old.some(function (name) { return name.toUpperCase() === candidate; })) old.push(candidate);
+    }
     state.vars = old;
     state.minterms = state.minterms.filter(function (m) { return m < limit; });
     state.dontCares = state.dontCares.filter(function (m) { return m < limit && state.minterms.indexOf(m) < 0; });
@@ -752,6 +832,48 @@
 
   function bind() {
     el.kmapWrap.addEventListener('click', onKmapClick);
+    ['pointerover', 'focusin'].forEach(function (type) {
+      el.kmapWrap.addEventListener(type, function (event) {
+        var node = event.target.closest ? event.target.closest('.kmap-cell') : null;
+        if (node) inspectVector(Number(node.dataset.minterm));
+      });
+      el.waveformSvg.addEventListener(type, function (event) {
+        var node = event.target.closest ? event.target.closest('[data-vector]') : null;
+        if (node) inspectVector(Number(node.dataset.vector));
+      });
+    });
+    el.kmapWrap.addEventListener('keydown', function (event) {
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].indexOf(event.key) < 0) return;
+      var buttons = Array.from(el.kmapWrap.querySelectorAll('.kmap-cell'));
+      var index = buttons.indexOf(event.target.closest('.kmap-cell'));
+      if (index < 0) return;
+      var columns = 1 << Math.ceil(state.numVars / 2);
+      var rows = buttons.length / columns;
+      var row = Math.floor(index / columns), column = index % columns;
+      if (event.key === 'ArrowLeft') column = (column + columns - 1) % columns;
+      if (event.key === 'ArrowRight') column = (column + 1) % columns;
+      if (event.key === 'ArrowUp') row = (row + rows - 1) % rows;
+      if (event.key === 'ArrowDown') row = (row + 1) % rows;
+      if (event.key === 'Home') column = 0;
+      if (event.key === 'End') column = columns - 1;
+      event.preventDefault();
+      buttons[row * columns + column].focus();
+    });
+    el.waveformSvg.addEventListener('keydown', function (event) {
+      var node = event.target.closest ? event.target.closest('[data-vector]') : null;
+      if (node && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); inspectVector(Number(node.dataset.vector)); }
+    });
+    el.probeInputs.addEventListener('click', function (event) {
+      var node = event.target.closest ? event.target.closest('[data-input]') : null;
+      if (!node) return;
+      var index = Number(node.dataset.input);
+      inspectVector(state.probe ^ (1 << (state.numVars - 1 - index)));
+      el.probeInputs.querySelector('[data-input="' + index + '"]').focus();
+    });
+    document.querySelector('.showcase').addEventListener('click', function (event) {
+      var node = event.target.closest ? event.target.closest('[data-preset]') : null;
+      if (node) loadPreset(node.dataset.preset);
+    });
     el.exprApply.addEventListener('click', applyExpression);
     el.exprInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') applyExpression(); });
     el.clearAll.addEventListener('click', function () {
@@ -761,18 +883,27 @@
     });
     el.varCount.addEventListener('change', changeVarCount);
     el.varNames.addEventListener('change', function () {
-      state.vars = readVars(); syncInputs(); recompute();
+      try {
+        state.vars = readVars(); state.preset = ''; state.netlistResult = null;
+        syncInputs(); recompute();
+        setStatus(el.exprStatus, 'Input names updated and verified.', 'ok');
+      } catch (error) { inputError(el.varNames, error); }
     });
     el.mintermInput.addEventListener('change', function () {
-      var limit = 1 << state.numVars;
-      state.minterms = parseList(el.mintermInput.value, limit);
-      state.dontCares = state.dontCares.filter(function (m) { return state.minterms.indexOf(m) < 0; });
-      state.preset = ''; syncInputs(); recompute();
+      try {
+        var minterms = LG.parseMintermList(el.mintermInput.value, state.numVars);
+        if (minterms.some(function (m) { return state.dontCares.indexOf(m) >= 0; })) throw new Error('An on-state cannot also be a don\'t care.');
+        state.minterms = minterms; state.preset = ''; state.netlistResult = null;
+        syncInputs(); recompute(); setStatus(el.exprStatus, 'Minterms updated and verified.', 'ok');
+      } catch (error) { inputError(el.mintermInput, error); }
     });
     el.dontCareInput.addEventListener('change', function () {
-      var limit = 1 << state.numVars;
-      state.dontCares = parseList(el.dontCareInput.value, limit).filter(function (m) { return state.minterms.indexOf(m) < 0; });
-      state.preset = ''; syncInputs(); recompute();
+      try {
+        var dontCares = LG.parseMintermList(el.dontCareInput.value, state.numVars);
+        if (dontCares.some(function (m) { return state.minterms.indexOf(m) >= 0; })) throw new Error('A don\'t care cannot also be an on-state.');
+        state.dontCares = dontCares; state.preset = ''; state.netlistResult = null;
+        syncInputs(); recompute(); setStatus(el.exprStatus, 'Don\'t cares updated and verified.', 'ok');
+      } catch (error) { inputError(el.dontCareInput, error); }
     });
     el.formSelect.addEventListener('change', function () { state.form = el.formSelect.value; recompute(); });
     el.moduleNameInput.addEventListener('change', function () {
@@ -787,8 +918,9 @@
     el.themeToggle.addEventListener('click', function () {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
       document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
-      el.themeToggle.textContent = dark ? 'HP Analyzer CRT' : 'IEEE Paper Datasheet';
+      el.themeToggle.textContent = dark ? 'Dark theme' : 'Light theme';
       el.themeToggle.setAttribute('aria-pressed', String(!dark));
+      try { localStorage.setItem('logicgate-theme', dark ? 'light' : 'dark'); } catch (error) { /* optional preference */ }
       renderAll();
     });
     el.helpToggle.addEventListener('click', function () {
@@ -800,6 +932,9 @@
     el.copyTb.addEventListener('click', function () { copyText(state.verilog.testbench, 'Testbench'); });
     el.downloadModule.addEventListener('click', function () { download(state.verilog.module, state.verilog.filename); });
     el.downloadTb.addEventListener('click', function () { download(state.verilog.testbench, state.verilog.testbenchFilename); });
+    el.downloadProof.addEventListener('click', function () {
+      download(LG.exportVerificationJSON({ numVars: state.numVars, vars: state.vars, minterms: state.minterms, dontCares: state.dontCares, form: state.form, moduleName: state.moduleName }), state.verilog.moduleName + '_proof.json');
+    });
   }
 
   function init() {
@@ -810,9 +945,12 @@
       el.presetSelect.appendChild(opt);
     });
     bind();
-    syncInputs();
-    recompute();
-    setStatus(el.exprStatus, 'Ready. Click Karnaugh map cells or enter a Boolean equation.', 'ok');
+    var theme = 'dark';
+    try { var saved = localStorage.getItem('logicgate-theme'); if (saved === 'light' || saved === 'dark') theme = saved; } catch (error) { /* optional preference */ }
+    document.documentElement.setAttribute('data-theme', theme);
+    el.themeToggle.textContent = theme === 'dark' ? 'Light theme' : 'Dark theme';
+    el.themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
+    loadPreset('sevenSegmentDecoder');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
