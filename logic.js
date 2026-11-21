@@ -1114,7 +1114,7 @@
             return values.has(key) ? values.get(key) : 0;
           });
           var result = node.def.fn(args);
-          if (node.type === 'CONST') result = node.params.value ? 1 : 0;
+          if (node.type === 'CONST') result = Number(node.params.value) ? 1 : 0;
           if (typeof result === 'number') {
             values.set(node.id + ':y', result);
           } else {
@@ -1256,12 +1256,19 @@
     if (!spec || typeof spec !== 'object') throw LogicError('spec must be an object');
     var numVars = spec.numVars;
     var vars = spec.vars;
+    var exprTable = null;
+    if (vars == null && numVars == null && spec.expr != null) {
+      /* An expression-only spec infers its variables from the parse. */
+      exprTable = evalTruthTable(spec.expr);
+      vars = exprTable.vars;
+      numVars = vars.length;
+    }
     var names = vars ? normalizeVars(vars) : resolveVarNames(numVars == null ? 2 : numVars);
     if (numVars == null) numVars = names.length;
     if (numVars !== names.length) throw LogicError('numVars must equal vars.length');
     var minterms = spec.minterms;
     if (minterms == null && spec.expr != null) {
-      var tt = evalTruthTable(spec.expr, names);
+      var tt = exprTable || evalTruthTable(spec.expr, names);
       minterms = tt.minterms;
     }
     var result = minimizeBoolean(numVars, minterms, spec.dontCares, { vars: names });
@@ -1620,8 +1627,14 @@
       return outputs;
     }
     if (name === 'alu4BitSlice') {
-      var slice = simulateNetlist(p.netlist, Array.from({ length: 16 }, function (_, i) { return i; }));
-      return slice.cycles.map(function (c) { return c.outputs.result; });
+      /* Independent oracle: the slice computes sum = B ^ (A ^ OP) ^ CIN
+         for input order A, B, CIN, OP (most significant vector bit first). */
+      var slice = [];
+      for (var v = 0; v < 16; v += 1) {
+        var av = (v >> 3) & 1, bv = (v >> 2) & 1, cin = (v >> 1) & 1, op = v & 1;
+        slice.push(bv ^ (av ^ op) ^ cin);
+      }
+      return slice;
     }
     var size = 1 << p.numVars;
     var table = new Array(size).fill(0);

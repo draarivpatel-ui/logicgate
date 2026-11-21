@@ -453,6 +453,19 @@ test('ALU slice preset netlist matches the full adder result vectors', function 
   assert.equal(r.hazards.length, 0);
 });
 
+test('ALU slice preset truth table is an independent arithmetic oracle', function () {
+  var expected = [];
+  for (var v = 0; v < 16; v += 1) {
+    var A = (v >> 3) & 1, B = (v >> 2) & 1, CIN = (v >> 1) & 1, OP = v & 1;
+    expected.push(B ^ (A ^ OP) ^ CIN);
+  }
+  var table = LG.presetTruthTable('alu4BitSlice');
+  assert.deepEqual(table, expected);
+  var sim = LG.simulateNetlist(LG.getPreset('alu4BitSlice').netlist,
+    Array.from({ length: 16 }, function (_, i) { return i; }));
+  assert.deepEqual(table, sim.cycles.map(function (c) { return c.outputs.result; }));
+});
+
 test('carry lookahead preset netlist computes C4 for all 512 vectors', function () {
   var table = LG.presetTruthTable('carryLookahead4Bit');
   var r = LG.simulateNetlist(LG.getPreset('carryLookahead4Bit').netlist,

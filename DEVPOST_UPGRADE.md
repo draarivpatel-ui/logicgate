@@ -37,20 +37,20 @@ Invalid input could silently drop a minterm or leave a previous circuit download
 
 ## Verification numbers
 
-Verified on Node v24.16.0 with:
+Verified on Node v26.8.1 with:
 
 ```sh
 node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js adversarial-test.js
 ```
 
-**145 passed, 0 failed, 0 skipped.**
+**150 passed, 0 failed, 0 skipped.**
 
 | Check | Verified coverage |
 | --- | --- |
-| Engine and regression tests | 73 |
-| Adversarial depth, sequential and UI-fence checks | 17 |
+| Engine and regression tests | 74 |
+| Adversarial depth, sequential and UI-fence checks | 19 |
 | Independent Verilog compiler/simulator checks | 32 |
-| DOM interaction tests | 23 |
+| DOM interaction tests | 25 |
 | Two-variable care specifications | All 81 disjoint on/don't-care combinations |
 | Three-variable Boolean functions | All 256, with an independent term/literal oracle |
 | Selected three-variable don't-care cases | 256 |

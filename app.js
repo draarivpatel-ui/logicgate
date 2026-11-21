@@ -209,7 +209,7 @@
       { label: 'POS Cost', value: r.pos.termCount + ' sums', detail: r.pos.literalCount + ' literals' },
       { label: 'Gate Count', value: sol.gateCount.total, detail: sol.gateCount.not + ' INV, ' + (sol.gateCount.and + sol.gateCount.or) + ' logic' },
       { label: 'Logic depth', value: sol.propagationDelay.levels, detail: 'balanced two-input gate model' },
-      { label: 'On / Don\'t-Care', value: r.minterms.length + ' / ' + (1 << r.numVars), detail: r.dontCares.length + ' X states' }
+      { label: 'On / Total', value: r.minterms.length + ' / ' + (1 << r.numVars), detail: r.dontCares.length + ' X states' }
     ];
     el.statRow.innerHTML = tiles.map(function (t) {
       return '<div class="stat-tile"><div class="label">' + esc(t.label) + '</div>' +
@@ -306,7 +306,7 @@
         '<span class="badge ' + (name === rec ? 'recommended' : '') + '">' + (name === state.form ? 'ACTIVE' : name === rec ? 'LOWER GATE COST' : 'VERIFIED') + '</span></div>' +
         '<div class="formula">' + esc(sol.expression) + '</div>' +
         '<div class="meta">' + sol.termCount + ' terms, ' + sol.literalCount + ' literals, ' +
-        sol.gateCount.total + ' two-input gates, depth ' + sol.propagationDelay.levels + '</div></div>';
+        sol.gateCount.total + ' gates, depth ' + sol.propagationDelay.levels + '</div></div>';
     }
     el.solutionBlock.innerHTML = card('Minimal Sum of Products', r.sop, 'SOP', 'Active: ' + state.form) +
       card('Minimal Product of Sums', r.pos, 'POS', '') +
@@ -353,10 +353,10 @@
       prev = v;
     }
     runs.push([start, prev]);
-    if (maxCount === 4 && runs.length > 1 && runs[0][0] === 0 && runs[runs.length - 1][1] === 3) {
+    if (maxCount === 4 && runs.length > 1 && runs[0][0] === 0 && runs[runs.length - 1][1] === maxCount - 1) {
       var head = runs[0];
       var tail = runs[runs.length - 1];
-      runs = [[tail[0], 3], [0, head[1]]].concat(runs.slice(1, -1));
+      runs = [[tail[0], maxCount - 1], [0, head[1]]].concat(runs.slice(1, -1));
     }
     return runs;
   }
@@ -518,7 +518,7 @@
     var lanes = inputs.length + invList.length;
     var top = 42, laneH = 24, gateY = top + lanes * laneH + 10;
     var railX = 34, gateX = 186, outerX = 420, outX = 548;
-    var h = gateY + Math.max(cubes.length, 2) * 44 + 48;
+    var h = gateY + Math.max(Math.min(cubes.length, MAX_GROUPS), 2) * 44 + 48;
     var w = outX + 76;
     var root = makeSvg(w, h, 'Gate level schematic of ' + state.form + ' implementation');
 
@@ -647,7 +647,7 @@
         signals.push({ name: 'net:' + s.name, color: groupColor(i), values: pad(s.values, 'X') });
       });
     }
-    var maxSignals = 12;
+    var maxSignals = 16;
     var shown = signals.slice(0, maxSignals);
     var cols = Math.min(axisLen, 32);
     var stride = Math.max(1, Math.ceil(axisLen / cols));
@@ -696,16 +696,22 @@
       drawMarker(root, x0 + (indices.length - 1) * step, yFor(lastV), lastV, sig.color);
     });
     indices.forEach(function (vector, index) {
-      var hit = svg('rect', { x: x0 + index * step, y: top, width: step, height: h - top - 18, fill: 'transparent', 'data-vector': vector, tabindex: '0', role: 'button', 'aria-label': 'Inspect vector ' + vector, class: 'wave-hit' });
-      if (vector < size) {
-        svgTitle(hit, 'Vector ' + vector + ': F = ' + outValues[vector]);
-      } else {
-        hit.setAttribute('aria-label', 'Netlist clock edge ' + vector);
-        hit.removeAttribute('data-vector');
-        svgTitle(hit, 'Netlist clock edge ' + vector);
+      var hitX = x0 + index * step;
+      if (vector >= size) {
+        /* Netlist clock edges carry a tooltip only; they are not inspectable vectors. */
+        var edge = svg('rect', { x: hitX, y: top, width: step, height: h - top - 18, fill: 'transparent' });
+        svgTitle(edge, 'Netlist clock edge ' + vector);
+        root.appendChild(edge);
+        return;
       }
+      var hit = svg('rect', { x: hitX, y: top, width: step, height: h - top - 18, fill: 'transparent', 'data-vector': vector, tabindex: '0', role: 'button', 'aria-label': 'Inspect vector ' + vector, class: 'wave-hit' });
+      svgTitle(hit, 'Vector ' + vector + ': F = ' + outValues[vector]);
       root.appendChild(hit);
     });
+    if (signals.length > shown.length) {
+      root.appendChild(svg('text', { x: w - 16, y: h - 4, 'text-anchor': 'end', 'font-size': 10, class: 'muted' },
+        '+' + (signals.length - shown.length) + ' more signals not shown'));
+    }
     replace(el.waveformSvg, root);
   }
 

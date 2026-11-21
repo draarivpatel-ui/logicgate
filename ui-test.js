@@ -153,3 +153,22 @@ test('theme toggle preserves active input errors and keeps stale exports disable
   h.dispose();
 });
 
+test('ALU waveform draws every netlist output including carry-out', () => {
+  const h = bench(); preset(h, 'alu4BitSlice');
+  assert.match(h.get('waveformSvg').textContent, /net:cout/);
+  assert.match(h.get('waveformSvg').textContent, /net:result/);
+  assert.match(h.get('netlistStatus').textContent, /Arithmetic oracle: PASS/);
+  h.dispose();
+});
+
+test('netlist clock edges are tooltips, not dead buttons', () => {
+  const h = bench(); preset(h, 'syncCounter');
+  const hits = h.get('waveformSvg').querySelectorAll('.wave-hit');
+  assert.equal(hits.length, 4);
+  for (let i = 0; i < hits.length; i += 1) {
+    assert.equal(hits[i].getAttribute('role'), 'button');
+    assert.ok(hits[i].getAttribute('data-vector') !== null);
+  }
+  h.dispose();
+});
+

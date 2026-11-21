@@ -262,3 +262,31 @@ test('all presets simulate a matching oracle through the full pipeline', functio
     assert.equal(res.cycles.length, vectors.length, meta.id);
   });
 });
+
+test('CONST gate node honors string and numeric parameter values', function () {
+  function run(value) {
+    var res = LG.simulateNetlist({
+      inputs: [],
+      nodes: [{ id: 'c', type: 'CONST', params: { value: value } }],
+      outputs: [{ node: 'c', port: 'y', name: 'o' }]
+    }, [{}]);
+    return res.cycles[0].outputs.o;
+  }
+  assert.equal(run(1), 1);
+  assert.equal(run('1'), 1);
+  assert.equal(run(true), 1);
+  assert.equal(run(0), 0);
+  assert.equal(run('0'), 0);
+  assert.equal(run(false), 0);
+  assert.equal(run(undefined), 0);
+});
+
+test('expression-only export spec infers its variables', function () {
+  var bundle = LG.exportVerilog({ expr: 'A ^ B ^ C' });
+  assert.equal(bundle.spec.numVars, 3);
+  assert.deepEqual(bundle.spec.vars, ['A', 'B', 'C']);
+  assert.equal(bundle.inputNames.length, 3);
+  var check = LG.verifyVerilog(bundle);
+  assert.equal(check.passes, true);
+  assert.equal(check.checked, 8);
+});
