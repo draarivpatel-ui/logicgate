@@ -559,14 +559,12 @@
         return;
       }
       /* Pick the uncovered target with the fewest covering candidates. */
-      var bestTarget = -1;
       var bestOptions = null;
       for (var t = 0; t < targetSet.length; t += 1) {
         if (covered & (1n << BigInt(t))) continue;
         var options = candidates.filter(function (c) { return c.bits & (1n << BigInt(t)); });
         if (bestOptions === null || options.length < bestOptions.length) {
           bestOptions = options;
-          bestTarget = t;
           if (options.length <= 1) break;
         }
       }
@@ -578,7 +576,6 @@
         search(0, covered | c.bits, selected);
         selected.pop();
       });
-      void bestTarget;
     }
     search(0, 0n, []);
     if (!best) throw LogicError('failed to find a cover');
