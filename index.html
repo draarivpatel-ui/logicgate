@@ -12,9 +12,7 @@
   <div class="app" id="app">
     <header class="datasheet-header">
       <div class="title-block">
-        <div class="doc-meta">LOGICGATE / THE HARDWARE PROOF WORKBENCH</div>
         <h1>Make logic. <span>Prove every state.</span></h1>
-        <p class="tagline">Turn a Boolean idea into a checked hardware module. Shape the map, follow a signal, and export the proof with the circuit.</p>
       </div>
       <div class="header-actions">
         <span class="instrument-readout" title="Zero network requests, zero runtime dependencies">Runs entirely on your device</span>
@@ -42,11 +40,12 @@
     </section>
 
     <nav class="showcase" aria-label="One-click showcase scenarios">
-      <div class="showcase-heading"><strong>Try a five-second challenge</strong><span>Every change is checked across all care states.</span></div>
-      <button type="button" class="scenario" data-preset="cyclicCover"><span>01 / EXACT COVER</span><strong>Beat the greedy choice</strong><small>Six states. Three cubes. Zero essentials.</small></button>
-      <button type="button" class="scenario" data-preset="staticHazard"><span>02 / SIGNAL INTEGRITY</span><strong>Find the hidden hazard</strong><small>Probe the A transition at B = C = 1.</small></button>
-      <button type="button" class="scenario" data-preset="sevenSegmentDecoder"><span>03 / REAL HARDWARE</span><strong>Light a seven-segment digit</strong><small>Use don't cares to simplify BCD logic.</small></button>
-      <button type="button" class="scenario" data-preset="carryLookahead4Bit"><span>04 / PARALLEL CARRY</span><strong>Verify all 512 vectors</strong><small>Lookahead gates checked against addition.</small></button>
+      <div class="showcase-heading"><strong>Try a five-second challenge</strong></div>
+      <button type="button" class="scenario" data-preset="cyclicCover"><strong>Beat the greedy cover choice</strong></button>
+      <button type="button" class="scenario" data-preset="staticHazard"><strong>Catch the static hazard</strong></button>
+      <button type="button" class="scenario" data-preset="sevenSegmentDecoder"><strong>Light a seven-segment digit</strong></button>
+      <button type="button" class="scenario" data-preset="carryLookahead4Bit"><strong>Verify all 512 carry vectors</strong></button>
+      <button type="button" class="scenario" data-preset="syncCounter"><strong>Clock a two-bit counter</strong></button>
     </nav>
     <main class="workspace" id="workspace" tabindex="-1">
       <aside class="panel controls" aria-label="Function specification">
@@ -106,7 +105,6 @@
         </label>
 
         <div class="preset-netlist" id="presetNetlist" hidden>
-          <h3>Gate-Level Netlist Stimulus</h3>
           <p id="presetNetlistDescription"></p>
           <button type="button" id="runNetlist" class="btn btn-primary">Run Netlist Sweep</button>
           <p class="field-note" id="netlistStatus" role="status"></p>
@@ -116,15 +114,12 @@
       <section class="content">
         <div class="stat-row" id="statRow" aria-label="Synthesis characteristics"></div>
         <section class="proof-strip" aria-label="Live equivalence checks"><div id="verificationBadges" role="status"></div><button type="button" class="btn btn-sm" id="downloadProof">Download proof JSON</button></section>
-        <section class="panel probe-panel" aria-label="Signal inspector"><div class="panel-head"><div><h2>Follow a signal</h2><p class="panel-sub">Toggle inputs, hover a map cell, or use arrow keys. Enter or Space edits the focused map cell.</p></div><span class="badge" id="probeVector">Vector 0</span></div><div id="probeInputs" class="probe-inputs"></div><output id="probeReadout" aria-live="polite"></output><p id="hazardReadout" class="field-note"></p></section>
+        <section class="panel probe-panel" aria-label="Signal inspector"><div class="panel-head"><h2>Follow a signal</h2><span class="badge" id="probeVector">Vector 0</span></div><div id="probeInputs" class="probe-inputs"></div><output id="probeReadout" aria-live="polite"></output><p class="field-note">Toggle inputs, hover a map cell, or use arrow keys. Enter or Space edits the focused map cell.</p><p id="hazardReadout" class="field-note"></p></section>
 
         <div class="two-col">
           <div class="panel viz-panel">
             <div class="panel-head">
-              <div>
-                <h2>Shape the Karnaugh map</h2>
-                <p class="panel-sub">Reflected binary axes (00, 01, 11, 10). Click any cell to step 0 &rarr; 1 &rarr; X.</p>
-              </div>
+              <h2>Shape the Karnaugh map</h2>
               <div class="legend" id="kmapLegend">
                 <span><i class="swatch swatch-one"></i> 1 (On)</span>
                 <span><i class="swatch swatch-zero"></i> 0 (Off)</span>
@@ -132,6 +127,7 @@
               </div>
             </div>
             <div class="kmap-wrap" id="kmapWrap"></div>
+            <p class="field-note">Reflected binary axes (00, 01, 11, 10). Click any cell to step 0 &rarr; 1 &rarr; X.</p>
             <div class="group-toggle">
               <label class="check"><input type="checkbox" id="showGroups" checked> Show prime implicant index markers</label>
               <label class="check"><input type="checkbox" id="showTexture"> Crosshatch prime cube overlays</label>
@@ -140,13 +136,11 @@
 
           <div class="panel">
             <div class="panel-head">
-              <div>
-                <h2>Inspect the chosen cover</h2>
-                <p class="panel-sub">Prime implicant loops on the Gray-code torus; edge-spanning cubes split across boundaries.</p>
-              </div>
+              <h2>Inspect the chosen cover</h2>
               <div class="legend" id="groupLegend"></div>
             </div>
             <div class="svg-host" id="groupSvg"></div>
+            <p class="field-note">Prime implicant loops on the Gray-code torus; edge-spanning cubes split across boundaries.</p>
             <h3 class="subhead">Table 3.1 Selected Cover Implicants</h3>
             <div class="table-scroll" id="groupTable"></div>
           </div>
@@ -155,10 +149,7 @@
         <div class="two-col">
           <div class="panel">
             <div class="panel-head">
-              <div>
-                <h2>Compare exact solutions</h2>
-                <p class="panel-sub">Minimal SOP and POS equations with gate and literal cost comparison.</p>
-              </div>
+              <h2>Compare exact solutions</h2>
             </div>
             <div class="solution-block" id="solutionBlock"></div>
             <h3 class="subhead">Prime implicant chart</h3>
@@ -167,10 +158,7 @@
 
           <div class="panel">
             <div class="panel-head">
-              <div>
-                <h2>Verify every state</h2>
-                <p class="panel-sub">Exhaustive verification of SOP and POS realizations against care minterms.</p>
-              </div>
+              <h2>Verify every state</h2>
               <button type="button" id="ttToggle" class="btn btn-sm">Highlight active rows</button>
             </div>
             <div class="table-scroll truth-scroll" id="truthTable"></div>
@@ -179,10 +167,7 @@
 
         <div class="panel">
           <div class="panel-head">
-            <div>
-              <h2>Follow gates and waveforms</h2>
-              <p class="panel-sub">Gate-level realization and multi-channel logic analyzer state waveform across input vectors.</p>
-            </div>
+            <h2>Follow gates and waveforms</h2>
           </div>
           <div class="schematic-waveform-grid">
             <div>
@@ -198,10 +183,7 @@
 
         <div class="panel export-panel">
           <div class="panel-head">
-            <div>
-              <h2>Export a circuit with its testbench</h2>
-              <p class="panel-sub">Synthesizable continuous-assignment RTL module paired with an exhaustive vector testbench.</p>
-            </div>
+            <h2>Export a circuit with its testbench</h2>
             <div class="btn-row">
               <button type="button" id="copyModule" class="btn btn-sm">Copy RTL</button>
               <button type="button" id="copyTb" class="btn btn-sm">Copy Testbench</button>

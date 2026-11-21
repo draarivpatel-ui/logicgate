@@ -14,6 +14,7 @@
   var MAX_VARS = 16;
   var MAX_PRIME_COMPARISONS = 2000000;
   var MAX_COVER_STATES = 200000;
+  var MAX_PARSE_DEPTH = 600;
   var DEFAULT_VAR_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
 
   function LogicError(message) {
@@ -167,9 +168,13 @@
     var names = vars == null ? null : normalizeVars(vars);
     var tokens = tokenize(source, names);
     var pos = 0;
+    var depth = 0;
 
     function peek() { return tokens[pos]; }
     function take() { var t = tokens[pos]; pos += 1; return t; }
+    function descend() {
+      if (++depth > MAX_PARSE_DEPTH) throw LogicError('expression nesting exceeds ' + MAX_PARSE_DEPTH + ' levels');
+    }
     function isPrimaryStart(t) { return !!t && (t.t === 'var' || t.t === 'const' || t.t === 'not' || t.t === 'lp'); }
     function isBinary(t) { return t && (t.t === 'op' || t.t === 'not_op'); }
 
@@ -209,6 +214,7 @@
     }
 
     function parseOr(minPrec) {
+      descend();
       var left = parseUnary();
       for (;;) {
         var t = peek();
@@ -227,16 +233,20 @@
         }
         break;
       }
+      depth -= 1;
       return left;
     }
 
     function parseUnary() {
-      /* A prime is postfix; !, ~ and NOT begin the next primary. */
+      /* A prime is postfix; !, ~ and NOT begin the next primary. Complement
+         runs nest one AST level each, so they share the parse depth budget
+         (evaluate/collectVars recurse over them). */
       var prefix = 0;
       while (peek() && peek().t === 'not') { take(); prefix += 1; }
       var node = peek() && peek().t === 'lp' ? parseGroup() : parsePrimary();
       var flips = prefix;
       while (peek() && peek().t === 'postfix') { take(); flips += 1; }
+      if (flips > MAX_PARSE_DEPTH) throw LogicError('complement chain exceeds ' + MAX_PARSE_DEPTH + ' levels');
       for (var i = 0; i < flips; i += 1) node = { type: 'NOT', args: [node] };
       return node;
     }
@@ -1055,6 +1065,15 @@
     });
     var cycles = [];
     var hazards = [];
+    /* A pin with no driver reads as 0; that is reported, never silent. */
+    order.forEach(function (n) {
+      n.inputs.forEach(function (wire, i) {
+        if (!wire) hazards.push({ cycle: null, type: 'undriven-input', node: n.id, port: i, message: 'node ' + n.id + ' input ' + i + ' has no driver and reads 0' });
+      });
+    });
+    dffs.forEach(function (n) {
+      if (!n.inputs[0]) hazards.push({ cycle: null, type: 'undriven-input', node: n.id, port: 0, message: 'register ' + n.id + ' D input has no driver and holds ' + n.init });
+    });
     var maxSteps = opts.maxSteps == null ? 200 : opts.maxSteps;
     if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 10000) throw LogicError('maxSteps must be an integer between 1 and 10000');
     var outputNames = new Set();
@@ -1289,7 +1308,7 @@
           var e = verilogExpression(p, varMap);
           return e.indexOf('&') >= 0 ? '(' + e + ')' : e;
         });
-        lines.push('    assign ' + outName + ' = ' + terms.join(' | ') + ';');
+        lines.push('    assign ' + outName + ' = ' + wrapJoin(terms, ' | ', '        ') + ';');
       }
     } else {
       /* POS: a maxterm with no literals evaluates to 0, and an empty product is 1. */
@@ -1298,7 +1317,7 @@
       } else if (solution.products.length === 1 && solution.products[0] === '0') {
         lines.push('    assign ' + outName + " = 1'b0;");
       } else {
-        lines.push('    assign ' + outName + ' = ' + solution.products.map(function (p) { return verilogSum(p, varMap); }).join(' & ') + ';');
+        lines.push('    assign ' + outName + ' = ' + wrapJoin(solution.products.map(function (p) { return verilogSum(p, varMap); }), ' & ', '        ') + ';');
       }
     }
     lines.push('');
@@ -1392,13 +1411,20 @@
     };
   }
 
+  /* Break long operator chains onto continuation lines so emitted files stay readable. */
+  function wrapJoin(parts, op, indent) {
+    var groups = [];
+    for (var i = 0; i < parts.length; i += 4) groups.push(parts.slice(i, i + 4).join(op));
+    return groups.join(op.trim() + '\n' + indent);
+  }
+
   function buildExpectedFunction(result, numVars, forDontCare, stimulusName) {
     var terms = [];
     result.minterms.forEach(function (m) {
       terms.push('(' + (forDontCare ? 's' : (stimulusName || 'stimulus')) + ' == ' + numVars + "'d" + m + ')');
     });
     if (terms.length === 0) return "1'b0";
-    return '(' + terms.join(' || ') + ')';
+    return '(' + wrapJoin(terms, ' || ', '            ') + ')';
   }
 
   /* Read the emitted RTL back into the parser and verify every care vector. */
@@ -1471,6 +1497,37 @@
       9, ['A0', 'B0', 'A1', 'B1', 'A2', 'B2', 'A3', 'B3', 'CIN'], [], [],
       null,
       { outputName: 'C4', moduleName: 'cla4_carry', netlist: carryLookaheadNetlist(), vectorCount: 512 }
+    ),
+    syncCounter: preset(
+      'syncCounter', 'Clocked two-bit counter',
+      'Two D registers with an enable. Eight clock edges count 0 to 3 twice, then four edges hold while EN is low. The next-bit equation is Q1 XOR Q0.',
+      2, ['Q1', 'Q0'], [1, 2], [], 'Q1 ^ Q0',
+      {
+        outputName: 'next_bit', moduleName: 'counter2_slice', runLabel: 'Clock the counter',
+        netlist: {
+          inputs: ['EN'],
+          outputs: [{ node: 'q0', port: 'q', name: 'b0' }, { node: 'q1', port: 'q', name: 'b1' }],
+          nodes: [
+            { id: 'q0', type: 'DFF', init: 0 }, { id: 'q1', type: 'DFF', init: 0 },
+            { id: 'x0', type: 'XOR' }, { id: 'a0', type: 'AND' }, { id: 'x1', type: 'XOR' }
+          ],
+          edges: [
+            { from: 'IN:EN', to: 'x0', toPort: 0 }, { from: 'q0', fromPort: 'q', to: 'x0', toPort: 1 },
+            { from: 'x0', fromPort: 'y', to: 'q0', toPort: 0 },
+            { from: 'IN:EN', to: 'a0', toPort: 0 }, { from: 'q0', fromPort: 'q', to: 'a0', toPort: 1 },
+            { from: 'a0', fromPort: 'y', to: 'x1', toPort: 0 }, { from: 'q1', fromPort: 'q', to: 'x1', toPort: 1 },
+            { from: 'x1', fromPort: 'y', to: 'q1', toPort: 0 }
+          ]
+        },
+        stimulus: [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+        /* Independent oracle: the count before edge i is the number of earlier EN=1 vectors, mod 4. */
+        expectedWave: (function () {
+          var en = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0];
+          var b0 = [], b1 = [], seen = 0;
+          for (var i = 0; i < en.length; i += 1) { var c = seen % 4; b0.push(c & 1); b1.push((c >> 1) & 1); seen += en[i]; }
+          return { b0: b0, b1: b1 };
+        })()
+      }
     ),
     majorityVoter: preset(
       'majorityVoter', 'Majority voter',

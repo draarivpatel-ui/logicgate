@@ -8,7 +8,7 @@ A Boolean equation can look correct and still fail at the boundaries between a p
 
 LogicGate is a zero-dependency browser workbench for exact digital logic synthesis. It builds minimal SOP and POS circuits, draws their Karnaugh groups, compares their gate costs, lets judges probe input vectors and checks exported Verilog against every care state.
 
-Four one-click challenges show the engineering immediately: a cyclic cover that defeats simple greedy choices, a hidden static hazard, a BCD display function that benefits from don't cares and a lookahead carry network checked across all 512 vectors.
+Five one-click challenges show the engineering immediately: a cyclic cover that defeats simple greedy choices, a hidden static hazard, a BCD display function that benefits from don't cares, a lookahead carry network checked across all 512 vectors and a clocked two-bit counter whose D registers hold state across twelve edges.
 
 The exported module comes with an exhaustive Verilog-2001 testbench. A downloadable proof report includes the actual care set, both synthesized forms, their equivalence results and the static hazard analysis.
 
@@ -33,22 +33,23 @@ Invalid input could silently drop a minterm or leave a previous circuit download
 - Static hazard inspection identifies the missing consensus for the A transition with B=C=1.
 - True four-bit lookahead carry is checked against addition for all 512 vectors.
 - Every export is parsed back and compared with its care states before the interface reports a pass.
-- Thirty actual Verilog modules and their exhaustive testbenches compile and run with `iverilog -g2001` and `vvp`.
+- Thirty-two actual Verilog modules and their exhaustive testbenches compile and run with `iverilog -g2001` and `vvp`.
 
 ## Verification numbers
 
 Verified on Node v24.16.0 with:
 
 ```sh
-node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js
+node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js adversarial-test.js
 ```
 
-**126 passed, 0 failed, 0 skipped.**
+**145 passed, 0 failed, 0 skipped.**
 
 | Check | Verified coverage |
 | --- | --- |
 | Engine and regression tests | 73 |
-| Independent Verilog compiler/simulator checks | 30 |
+| Adversarial depth, sequential and UI-fence checks | 17 |
+| Independent Verilog compiler/simulator checks | 32 |
 | DOM interaction tests | 23 |
 | Two-variable care specifications | All 81 disjoint on/don't-care combinations |
 | Three-variable Boolean functions | All 256, with an independent term/literal oracle |

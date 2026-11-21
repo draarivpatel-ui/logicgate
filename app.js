@@ -97,7 +97,10 @@
     el.presetSelect.value = state.preset;
     var p = state.preset ? LG.getPreset(state.preset) : null;
     el.presetNetlist.hidden = !(p && p.netlist);
-    if (p && p.netlist) el.presetNetlistDescription.textContent = p.description;
+    if (p && p.netlist) {
+      el.presetNetlistDescription.textContent = p.description;
+      el.runNetlist.textContent = p.runLabel || 'Run Netlist Sweep';
+    }
   }
 
   function setStatus(node, text, kind) {
@@ -299,7 +302,7 @@
   function renderSolution(r) {
     var rec = r.metrics.sopVsPos.recommended;
     function card(kicker, sol, name, badge) {
-      return '<div class="expr-card"><div class="kicker"><span>' + esc(kicker) + ' (' + name + ')</span>' +
+      return '<div class="expr-card"><div class="card-head"><span>' + esc(kicker) + ' (' + name + ')</span>' +
         '<span class="badge ' + (name === rec ? 'recommended' : '') + '">' + (name === state.form ? 'ACTIVE' : name === rec ? 'LOWER GATE COST' : 'VERIFIED') + '</span></div>' +
         '<div class="formula">' + esc(sol.expression) + '</div>' +
         '<div class="meta">' + sol.termCount + ' terms, ' + sol.literalCount + ' literals, ' +
@@ -307,7 +310,7 @@
     }
     el.solutionBlock.innerHTML = card('Minimal Sum of Products', r.sop, 'SOP', 'Active: ' + state.form) +
       card('Minimal Product of Sums', r.pos, 'POS', '') +
-      '<div class="expr-card"><div class="kicker"><span>Gate Cost Comparison</span></div>' +
+      '<div class="expr-card"><div class="card-head"><span>Gate Cost Comparison</span></div>' +
       '<div class="formula">Preferred Two-Level Form: ' + esc(rec) + '</div><div class="meta">' +
       r.metrics.sopVsPos.sopGates + ' gates (SOP) vs. ' + r.metrics.sopVsPos.posGates +
       ' gates (POS). Delay estimates describe a balanced gate model before device mapping.</div></div>';
@@ -418,6 +421,12 @@
           var ww = (maxC - minC + 1) * (cell + gap) - gap - 6 - off * 2;
           var hh = (maxR - minR + 1) * (cell + gap) - gap - 6 - off * 2;
           if (!firstBox) firstBox = { x: x0, y: y0 };
+          /* Halo underlay keeps every loop legible even when a group color
+             matches the cell fill (e.g. green loop over a 1 cell). */
+          root.appendChild(svg('rect', {
+            x: x0, y: y0, width: ww, height: hh, rx: 3, fill: 'none',
+            stroke: cssVar('--surface-0'), 'stroke-width': 5.4, opacity: 0.85
+          }));
           var rect = svg('rect', {
             x: x0, y: y0, width: ww, height: hh, rx: 3, fill: 'none',
             stroke: color, 'stroke-width': 2.4, 'stroke-dasharray': gi % 2 ? '6 3' : 'none'
@@ -608,37 +617,55 @@
 
   function renderWaveform(r) {
     var size = 1 << state.numVars;
+    /* Netlist channels belong on this axis only when the active preset's input
+       width matches the current variable count (a 9-input carry sweep cannot
+       share a 4-bit axis). A sequential sweep extends the axis past `size`
+       into clock edges; spec channels hold 'X' beyond their vector range. */
+    var wave = null;
+    if (state.netlistResult && state.preset) {
+      var wavePreset = LG.getPreset(state.preset);
+      if (wavePreset && wavePreset.numVars === state.numVars && state.netlistResult.waveform) wave = state.netlistResult.waveform;
+    }
+    var axisLen = wave && wave.cycles > size ? wave.cycles : size;
+    function pad(vals, fill) {
+      var a = vals.slice(0, axisLen);
+      while (a.length < axisLen) a.push(fill);
+      return a;
+    }
     var signals = [];
     state.vars.forEach(function (name, i) {
-      signals.push({ name: name, color: cssVar('--accent'), values: Array.from({ length: size }, function (_, m) { return (m >> (state.numVars - 1 - i)) & 1; }) });
+      signals.push({ name: name, color: cssVar('--accent'), values: pad(Array.from({ length: size }, function (_, m) { return (m >> (state.numVars - 1 - i)) & 1; }), 'X') });
     });
-    var wave = state.netlistResult && state.netlistResult.waveform;
     var outValues = Array.from({ length: size }, function (_, m) {
       return state.dontCares.indexOf(m) >= 0 ? 'X' : r.truthTable[m];
     });
-    signals.push({ name: 'F (' + state.form + ')', color: cssVar('--series-2'), values: outValues });
-    signals.push({ name: 'F (SOP)', color: cssVar('--series-3'), values: r.verification.sopOutputs.slice() });
-    signals.push({ name: 'F (POS)', color: cssVar('--series-4'), values: r.verification.posOutputs.slice() });
+    signals.push({ name: 'F (spec)', color: cssVar('--series-2'), values: pad(outValues, 'X') });
+    signals.push({ name: 'F (SOP)', color: cssVar('--series-3'), values: pad(r.verification.sopOutputs, 'X') });
+    signals.push({ name: 'F (POS)', color: cssVar('--series-4'), values: pad(r.verification.posOutputs, 'X') });
     if (wave && wave.signals.length) {
       wave.signals.forEach(function (s, i) {
-        var padded = s.values.slice(0, size);
-        while (padded.length < size) padded.push(0);
-        signals.push({ name: 'net:' + s.name, color: groupColor(i), values: padded });
+        signals.push({ name: 'net:' + s.name, color: groupColor(i), values: pad(s.values, 'X') });
       });
     }
     var maxSignals = 12;
     var shown = signals.slice(0, maxSignals);
-    var cols = Math.min(size, 32);
-    var stride = Math.max(1, Math.ceil(size / cols));
+    var cols = Math.min(axisLen, 32);
+    var stride = Math.max(1, Math.ceil(axisLen / cols));
     var indices = [];
-    for (var m = 0; m < size; m += stride) indices.push(m);
+    for (var m = 0; m < axisLen; m += stride) indices.push(m);
     var step = Math.max(12, Math.min(26, 480 / indices.length));
     var labelW = 90, x0 = labelW + 10, rowH = 30, top = 32;
     var h = top + shown.length * rowH + 26;
     var w = x0 + indices.length * step + 26;
     var root = makeSvg(w, h, 'Timing waveform for all input combinations');
     root.appendChild(svg('text', { x: 10, y: 17, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
-      'State waveform (' + indices.length + ' of ' + size + ' vectors)'));
+      axisLen > size
+        ? 'State waveform (' + size + ' vectors, then ' + (axisLen - size) + ' netlist clock edges)'
+        : 'State waveform (' + indices.length + ' of ' + size + ' vectors)'));
+    if (axisLen > size) {
+      var sx = x0 + Math.floor(size / stride) * step;
+      root.appendChild(svg('line', { x1: sx, y1: top - 4, x2: sx, y2: h - 18, stroke: cssVar('--accent'), 'stroke-width': 1.4, 'stroke-dasharray': '4 3' }));
+    }
     indices.forEach(function (idx, ci) {
       var vx = x0 + ci * step;
       root.appendChild(svg('line', { x1: vx, y1: top - 4, x2: vx, y2: h - 18, stroke: cssVar('--border-soft'), 'stroke-width': 1 }));
@@ -670,7 +697,13 @@
     });
     indices.forEach(function (vector, index) {
       var hit = svg('rect', { x: x0 + index * step, y: top, width: step, height: h - top - 18, fill: 'transparent', 'data-vector': vector, tabindex: '0', role: 'button', 'aria-label': 'Inspect vector ' + vector, class: 'wave-hit' });
-      svgTitle(hit, 'Vector ' + vector + ': F = ' + outValues[vector]);
+      if (vector < size) {
+        svgTitle(hit, 'Vector ' + vector + ': F = ' + outValues[vector]);
+      } else {
+        hit.setAttribute('aria-label', 'Netlist clock edge ' + vector);
+        hit.removeAttribute('data-vector');
+        svgTitle(hit, 'Netlist clock edge ' + vector);
+      }
       root.appendChild(hit);
     });
     replace(el.waveformSvg, root);
@@ -804,16 +837,32 @@
     if (!p || !p.netlist) return;
     var vectors = [];
     var numInputs = p.netlist.inputs.length;
-    var count = Math.min(1 << numInputs, 65536);
-    for (var m = 0; m < count; m += 1) vectors.push(m);
+    var count = Math.min(p.stimulus ? p.stimulus.length : (1 << numInputs), 65536);
+    for (var m = 0; m < count; m += 1) vectors.push(p.stimulus ? p.stimulus[m] : m);
     try {
       state.netlistResult = LG.simulateNetlist(p.netlist, vectors);
-      var expected = LG.presetTruthTable(state.preset);
-      var outputName = state.netlistResult.outputs[0];
-      var matches = state.netlistResult.cycles.every(function (cycle, vector) { return cycle.outputs[outputName] === expected[vector]; });
       var outputs = state.netlistResult.outputs.join(', ');
-      setStatus(el.netlistStatus, 'Simulated ' + count + ' vectors. Outputs: ' + outputs + '. Hazards: ' +
-        state.netlistResult.hazards.length + '. Arithmetic oracle: ' + (matches ? 'PASS' : 'FAIL') + '.', matches ? 'ok' : 'error');
+      var matches;
+      if (p.expectedWave) {
+        /* Sequential oracle: every named output, every clock edge. */
+        matches = state.netlistResult.cycles.every(function (cycle, i) {
+          return Object.keys(p.expectedWave).every(function (name) { return cycle.outputs[name] === p.expectedWave[name][i]; });
+        });
+      } else {
+        var expected = LG.presetTruthTable(state.preset);
+        var outputName = state.netlistResult.outputs[0];
+        matches = state.netlistResult.cycles.every(function (cycle, vector) { return cycle.outputs[outputName] === expected[vector]; });
+      }
+      var unit = numInputs === 0 || p.stimulus ? 'clock edges' : 'vectors';
+      var readout = '';
+      if (count <= 16) {
+        readout = ' Sequence ' + state.netlistResult.cycles.map(function (c) {
+          return state.netlistResult.outputs.map(function (o) { return c.outputs[o]; }).join('');
+        }).join(' ') + '.';
+      }
+      setStatus(el.netlistStatus, 'Simulated ' + count + ' ' + unit + '. Outputs: ' + outputs + '. Hazards: ' +
+        state.netlistResult.hazards.length + '.' + readout + ' ' + (p.expectedWave ? 'Sequence' : 'Arithmetic') +
+        ' oracle: ' + (matches ? 'PASS' : 'FAIL') + '.', matches ? 'ok' : 'error');
       if (p.numVars <= 4) renderWaveform(state.result);
       toast('Netlist sweep completed');
     } catch (err) {
