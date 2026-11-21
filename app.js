@@ -24,6 +24,8 @@
   state.probe = 0;
   state.rtlCheck = null;
   state.inputError = '';
+  /* WCAG 2.1.4: every app keyboard shortcut can be switched off. */
+  state.mapKeys = true;
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {};
@@ -34,7 +36,8 @@
     'primeList', 'groupLegend', 'groupSvg', 'groupTable', 'truthTable', 'ttToggle',
     'schematicSvg', 'waveformSvg', 'copyModule', 'copyTb', 'downloadModule', 'downloadTb',
     'moduleFilename', 'tbFilename', 'moduleCode', 'tbCode', 'exportStatus', 'toast', 'varCountLabel',
-    'verificationBadges', 'downloadProof', 'probeInputs', 'probeReadout', 'probeVector', 'hazardReadout'
+    'verificationBadges', 'downloadProof', 'probeInputs', 'probeReadout', 'probeVector', 'hazardReadout',
+    'keyShortcuts'
   ].forEach(function (id) { el[id] = $(id); });
 
   function esc(text) {
@@ -67,13 +70,28 @@
     return node;
   }
 
-  function makeSvg(width, height, label) {
-    var root = svg('svg', { viewBox: '0 0 ' + width + ' ' + height, role: 'img', 'aria-label': label, preserveAspectRatio: 'xMidYMid meet' });
+  /* role "img" makes every descendant presentational; containers that hold
+     interactive pieces must use a group role instead (wave-hit rects). */
+  function makeSvg(width, height, label, role) {
+    var root = svg('svg', { viewBox: '0 0 ' + width + ' ' + height, role: role || 'img', 'aria-label': label, preserveAspectRatio: 'xMidYMid meet' });
     root.setAttribute('height', height);
     return root;
   }
 
   function replace(host, node) { host.replaceChildren(node); }
+
+  /* Focus guard: a re-render rebuilds the host subtree, which would drop
+     keyboard focus to <body>. If the focused element carried attr, restore
+     focus to its rebuilt twin; otherwise leave focus alone. */
+  function guardedRender(host, attr, render) {
+    var active = document.activeElement;
+    var token = active && host.contains(active) ? active.getAttribute(attr) : null;
+    render();
+    if (token != null) {
+      var next = host.querySelector('[' + attr + '="' + token + '"]');
+      if (next && typeof next.focus === 'function') next.focus();
+    }
+  }
 
   /* ---------------- State and input parsing ---------------- */
 
@@ -174,10 +192,12 @@
 
   function renderProbe() {
     state.probe = state.probe & ((1 << state.numVars) - 1);
-    el.probeInputs.innerHTML = state.vars.map(function (name, index) {
-      var value = (state.probe >> (state.numVars - 1 - index)) & 1;
-      return '<button type="button" class="signal-toggle" data-input="' + index + '" aria-pressed="' + !!value + '">' + esc(name) + '<strong>' + value + '</strong></button>';
-    }).join('');
+    guardedRender(el.probeInputs, 'data-input', function () {
+      el.probeInputs.innerHTML = state.vars.map(function (name, index) {
+        var value = (state.probe >> (state.numVars - 1 - index)) & 1;
+        return '<button type="button" class="signal-toggle" data-input="' + index + '" aria-pressed="' + !!value + '">' + esc(name) + '<strong>' + value + '</strong></button>';
+      }).join('');
+    });
     updateProbeReadout();
   }
 
@@ -262,7 +282,7 @@
         btn.type = 'button';
         btn.className = 'kmap-cell' + (cell.value === 1 ? ' is-one' : cell.value === 'X' ? ' is-dc' : '');
         btn.dataset.minterm = String(cell.minterm);
-        btn.setAttribute('aria-label', 'minterm ' + cell.minterm + ', value ' + cell.value + '. Click to cycle.');
+        btn.setAttribute('aria-label', 'minterm ' + cell.minterm + ', value ' + cell.value + '. Activate to cycle.');
         btn.title = 'm' + cell.minterm + ': ' + state.vars.map(function (v, i) {
           return ((cell.minterm >> (state.numVars - 1 - i)) & 1 ? '' : '~') + v;
         }).join(' ') + ' | F = ' + cell.value + ' | click to cycle 0, 1, X';
@@ -287,7 +307,7 @@
       body.appendChild(tr);
     }
     table.appendChild(body);
-    replace(el.kmapWrap, table);
+    guardedRender(el.kmapWrap, 'data-minterm', function () { replace(el.kmapWrap, table); });
   }
 
   function svgHtml(tag, cls, text) {
@@ -470,7 +490,7 @@
         esc(groupColor(i)) + '"></i>G' + (i + 1) + '</span></td><td>' + esc(sol.terms[i] || '') +
         '</td><td>' + cube.literals + '</td><td>' + cube.minterms.map(function (m) { return 'm' + m; }).join(' ') + '</td></tr>';
     }).join('');
-    el.groupTable.innerHTML = '<table class="data"><thead><tr><th>Group</th><th>Implicant</th><th>Literals</th><th>Covered Minterms</th></tr></thead><tbody>' +
+    el.groupTable.innerHTML = '<table class="data" aria-label="Prime implicant cover groups"><thead><tr><th>Group</th><th>Implicant</th><th>Literals</th><th>Covered Minterms</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="4">No groups (constant function)</td></tr>') + '</tbody></table>';
   }
 
@@ -491,7 +511,7 @@
         '<td class="' + fCls + '">' + (isDC ? 'X' : r.truthTable[m]) + '</td>' +
         '<td>' + r.verification.sopOutputs[m] + '</td><td>' + r.verification.posOutputs[m] + '</td></tr>');
     }
-    el.truthTable.innerHTML = '<table class="data">' + head + '<tbody>' + rows.join('') + '</tbody></table>';
+    el.truthTable.innerHTML = '<table class="data" aria-label="Truth table with SOP and POS outputs">' + head + '<tbody>' + rows.join('') + '</tbody></table>';
     el.ttToggle.textContent = state.highlight ? 'Highlight active rows' : 'Plain table rows';
     el.ttToggle.setAttribute('aria-pressed', String(state.highlight));
     el.truthTable.querySelector('table').classList.toggle('no-highlight', !state.highlight);
@@ -657,7 +677,7 @@
     var labelW = 90, x0 = labelW + 10, rowH = 30, top = 32;
     var h = top + shown.length * rowH + 26;
     var w = x0 + indices.length * step + 26;
-    var root = makeSvg(w, h, 'Timing waveform for all input combinations');
+    var root = makeSvg(w, h, 'Timing waveform for all input combinations', 'group');
     root.appendChild(svg('text', { x: 10, y: 17, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
       axisLen > size
         ? 'State waveform (' + size + ' vectors, then ' + (axisLen - size) + ' netlist clock edges)'
@@ -704,7 +724,14 @@
         root.appendChild(edge);
         return;
       }
-      var hit = svg('rect', { x: hitX, y: top, width: step, height: h - top - 18, fill: 'transparent', 'data-vector': vector, tabindex: '0', role: 'button', 'aria-label': 'Inspect vector ' + vector, class: 'wave-hit' });
+      /* Keyboard-inspectable rects exist only while shortcuts are on (WCAG 2.1.4);
+         with shortcuts off they degrade to pointer tooltips, never dead buttons. */
+      var attrs = { x: hitX, y: top, width: step, height: h - top - 18, fill: 'transparent', 'data-vector': vector };
+      if (state.mapKeys) {
+        attrs.tabindex = '0'; attrs.role = 'button';
+        attrs['aria-label'] = 'Inspect vector ' + vector; attrs.class = 'wave-hit';
+      }
+      var hit = svg('rect', attrs);
       svgTitle(hit, 'Vector ' + vector + ': F = ' + outValues[vector]);
       root.appendChild(hit);
     });
@@ -712,7 +739,7 @@
       root.appendChild(svg('text', { x: w - 16, y: h - 4, 'text-anchor': 'end', 'font-size': 10, class: 'muted' },
         '+' + (signals.length - shown.length) + ' more signals not shown'));
     }
-    replace(el.waveformSvg, root);
+    guardedRender(el.waveformSvg, 'data-vector', function () { replace(el.waveformSvg, root); });
   }
 
   function drawMarker(root, x, y, value, color) {
@@ -908,6 +935,7 @@
       });
     });
     el.kmapWrap.addEventListener('keydown', function (event) {
+      if (!state.mapKeys) return;
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].indexOf(event.key) < 0) return;
       var buttons = Array.from(el.kmapWrap.querySelectorAll('.kmap-cell'));
       var index = buttons.indexOf(event.target.closest('.kmap-cell'));
@@ -925,6 +953,7 @@
       buttons[row * columns + column].focus();
     });
     el.waveformSvg.addEventListener('keydown', function (event) {
+      if (!state.mapKeys) return;
       var node = event.target.closest ? event.target.closest('[data-vector]') : null;
       if (node && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); inspectVector(Number(node.dataset.vector)); }
     });
@@ -979,6 +1008,16 @@
     el.runNetlist.addEventListener('click', runNetlist);
     el.showGroups.addEventListener('change', function () { state.showGroups = el.showGroups.checked; renderKmap(state.result); });
     el.showTexture.addEventListener('change', function () { state.showTexture = el.showTexture.checked; renderGroups(state.result); });
+    el.keyShortcuts.addEventListener('change', function () {
+      /* If focus sits on a wave-hit rect that is about to lose tabindex,
+         rescue it onto the toggle: dropping to <body> would strand the user. */
+      var rescue = !el.keyShortcuts.checked && el.waveformSvg.contains(document.activeElement);
+      state.mapKeys = el.keyShortcuts.checked;
+      try { localStorage.setItem('logicgate-mapkeys', state.mapKeys ? '1' : '0'); } catch (error) { /* optional preference */ }
+      /* Wave hit rects gain or lose keyboard reachability with the toggle. */
+      renderWaveform(state.result);
+      if (rescue) el.keyShortcuts.focus();
+    });
     el.ttToggle.addEventListener('click', function () { state.highlight = !state.highlight; renderTruthTable(state.result); });
     el.themeToggle.addEventListener('click', function () {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -1015,6 +1054,8 @@
     document.documentElement.setAttribute('data-theme', theme);
     el.themeToggle.textContent = theme === 'dark' ? 'Light theme' : 'Dark theme';
     el.themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
+    try { state.mapKeys = localStorage.getItem('logicgate-mapkeys') !== '0'; } catch (error) { /* optional preference */ }
+    el.keyShortcuts.checked = state.mapKeys;
     loadPreset('sevenSegmentDecoder');
   }
 

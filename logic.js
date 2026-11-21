@@ -14,6 +14,9 @@
   var MAX_VARS = 16;
   var MAX_PRIME_COMPARISONS = 2000000;
   var MAX_COVER_STATES = 200000;
+  /* Wall-time twin of the state budget: deep charts cost far more per node,
+     so cap the exact search effort before degrading to the greedy cover. */
+  var MAX_COVER_MS = 4000;
   var MAX_PARSE_DEPTH = 600;
   var DEFAULT_VAR_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
 
@@ -440,8 +443,6 @@
     return ((minterm & implicant.mask) ^ implicant.value) === 0;
   }
 
-  function isPowerOfTwo(n) { return n > 0 && (n & (n - 1)) === 0; }
-
   function primeImplicants(numVars, terms) {
     resolveVarNames(numVars);
     terms = parseMintermList(terms, numVars);
@@ -456,40 +457,39 @@
     var current = groups;
     var allPrimes = new Map();
     var round = 0;
+    /* Merge partners are looked up directly instead of scanned pairwise: cube
+       (mask, value) merges only with (mask, value ^ bit) for each bit in mask,
+       so each round costs cubes * vars map lookups, not cubes^2 comparisons. */
     while (current.size > 0 && round <= numVars) {
       var entries = Array.from(current.values());
       var next = new Map();
-      var byOnes = new Map();
       entries.forEach(function (imp) {
-        var ones = popcount(imp.value & imp.mask);
-        if (!byOnes.has(ones)) byOnes.set(ones, []);
-        byOnes.get(ones).push(imp);
+        var bits = imp.mask;
+        while (bits) {
+          var bit = bits & -bits;
+          bits ^= bit;
+          if (!(imp.value & bit)) continue;
+          if (++comparisons > MAX_PRIME_COMPARISONS) throw LogicError('Exact prime generation budget exceeded; reduce the variable count or simplify the function');
+          var partner = current.get(implicantKey(imp.mask, imp.value ^ bit));
+          if (!partner) continue;
+          var mask = imp.mask & ~bit;
+          var value = imp.value & mask;
+          var key = implicantKey(mask, value);
+          if (!next.has(key)) {
+            var seen = new Set(imp.minterms);
+            var minterms = imp.minterms.slice();
+            partner.minterms.forEach(function (m) { if (!seen.has(m)) { seen.add(m); minterms.push(m); } });
+            next.set(key, { mask: mask, value: value, minterms: minterms, used: false });
+          } else {
+            var existing = next.get(key);
+            var have = new Set(existing.minterms);
+            imp.minterms.forEach(function (m) { if (!have.has(m)) { have.add(m); existing.minterms.push(m); } });
+            partner.minterms.forEach(function (m) { if (!have.has(m)) { have.add(m); existing.minterms.push(m); } });
+          }
+          imp.used = true;
+          partner.used = true;
+        }
       });
-      var onesKeys = Array.from(byOnes.keys()).sort(function (a, b) { return a - b; });
-      for (var gi = 0; gi + 1 < onesKeys.length; gi += 1) {
-        var low = byOnes.get(onesKeys[gi]) || [];
-        var high = byOnes.get(onesKeys[gi + 1]) || [];
-        if (onesKeys[gi + 1] !== onesKeys[gi] + 1) continue;
-        low.forEach(function (a) {
-          high.forEach(function (b) {
-            if (++comparisons > MAX_PRIME_COMPARISONS) throw LogicError('Exact prime generation budget exceeded; reduce the variable count or simplify the function');
-            if (a.mask !== b.mask) return;
-            var diff = (a.value ^ b.value) & a.mask;
-            if (!isPowerOfTwo(diff)) return;
-            var mask = a.mask & ~diff;
-            var value = a.value & mask;
-            var key = implicantKey(mask, value);
-            var minterms = a.minterms.concat(b.minterms).filter(function (m, idx, arr) { return arr.indexOf(m) === idx; });
-            if (!next.has(key)) next.set(key, { mask: mask, value: value, minterms: minterms, used: false });
-            else {
-              var existing = next.get(key);
-              minterms.forEach(function (m) { if (existing.minterms.indexOf(m) < 0) existing.minterms.push(m); });
-            }
-            a.used = true;
-            b.used = true;
-          });
-        });
-      }
       entries.forEach(function (imp) {
         if (!imp.used) {
           var k = implicantKey(imp.mask, imp.value);
@@ -509,6 +509,7 @@
 
   /* Enumerate covers of the essential-free remainder using branch and bound. */
   function minimumCover(primes, targets) {
+    var deadline = Date.now() + MAX_COVER_MS;
     if (targets.length === 0) return [];
     var targetSet = targets.slice();
     var targetIndex = new Map();
@@ -527,7 +528,13 @@
     candidates.sort(function (a, b) {
       return bitCount(b.bits) - bitCount(a.bits) || a.literals - b.literals || a.index - b.index;
     });
+    /* Seed an incumbent with a greedy cover: the branch and bound below then
+       only explores states that can strictly improve on it. */
+    var maxCover = 0;
+    candidates.forEach(function (c) { var s = bitCount(c.bits); if (s > maxCover) maxCover = s; });
     var best = null;
+    var incumbent = greedyPick(candidates, full, bitCount);
+    if (incumbent) best = { indices: incumbent.map(function (c) { return c.index; }), s: score(incumbent) };
     var visited = new Map();
     var searched = 0;
     function score(sel) {
@@ -543,7 +550,7 @@
       return false;
     }
     function search(start, covered, selected) {
-      if (++searched > MAX_COVER_STATES) throw LogicError('Exact cover budget exceeded; reduce the variable count or simplify the function');
+      if (++searched > MAX_COVER_STATES || Date.now() > deadline) throw LogicError('Exact cover budget exceeded; reduce the variable count or simplify the function');
       var currentScore = score(selected);
       var prior = visited.get(covered);
       if (prior && !better(currentScore, prior)) return;
@@ -558,10 +565,14 @@
         if (!best || better(s, best.s)) best = { indices: selected.map(function (c) { return c.index; }), s: s };
         return;
       }
+      /* Lower bound: no cover can use fewer extra terms than the remaining
+         cells divided by the largest term coverage in the chart. */
+      if (best && maxCover > 0 && selected.length + Math.ceil(bitCount(full & ~covered) / maxCover) > best.s[0]) return;
       /* Pick the uncovered target with the fewest covering candidates. */
       var bestTarget = -1;
       var bestOptions = null;
       for (var t = 0; t < targetSet.length; t += 1) {
+        if ((t & 63) === 0 && Date.now() > deadline) throw LogicError('Exact cover budget exceeded; reduce the variable count or simplify the function');
         if (covered & (1n << BigInt(t))) continue;
         var options = candidates.filter(function (c) { return c.bits & (1n << BigInt(t)); });
         if (bestOptions === null || options.length < bestOptions.length) {
@@ -583,6 +594,47 @@
     search(0, 0n, []);
     if (!best) throw LogicError('failed to find a cover');
     return best.indices.map(function (i) { return primes[i]; });
+  }
+
+  /* Greedy set cover over bit-candidates: repeat max-gain picks until the
+     full target mask is covered. Deterministic. */
+  function greedyPick(candidates, full, bitCount) {
+    var covered = 0n;
+    var chosen = [];
+    var pool = candidates.slice();
+    while (covered !== full) {
+      var best = null;
+      var bestGain = 0;
+      pool.forEach(function (c) {
+        var gain = bitCount(c.bits & ~covered);
+        if (gain > bestGain || (gain === bestGain && best && c.literals < best.literals)) {
+          best = c;
+          bestGain = gain;
+        }
+      });
+      if (!best || bestGain === 0) return null;
+      chosen.push(best);
+      covered |= best.bits;
+      pool.splice(pool.indexOf(best), 1);
+    }
+    return chosen;
+  }
+
+  /* Deterministic fallback when the exact search exceeds its state budget;
+     functional equivalence still holds, only optimality is unproven. */
+  function greedyCover(primes, targets) {
+    var targetIndex = new Map();
+    targets.forEach(function (m, i) { targetIndex.set(m, i); });
+    var candidates = primes.map(function (p, i) {
+      var bits = 0n;
+      p.minterms.forEach(function (m) { if (targetIndex.has(m)) bits |= 1n << BigInt(targetIndex.get(m)); });
+      return { index: i, bits: bits, literals: literalCost(p) };
+    }).filter(function (c) { return c.bits !== 0n; });
+    if (candidates.length === 0) throw LogicError('no prime implicant covers the required minterms');
+    function bitCount(bits) { var count = 0; while (bits) { bits &= bits - 1n; count++; } return count; }
+    var chosen = greedyPick(candidates, (1n << BigInt(targets.length)) - 1n, bitCount);
+    if (!chosen) throw LogicError('failed to find a cover');
+    return chosen.map(function (c) { return primes[c.index]; });
   }
 
   function implicantToProduct(imp, names, numVars, complemented) {
@@ -608,7 +660,10 @@
       parts.push((usePositive ? '' : '~') + names[i]);
     }
     if (parts.length === 0) return complemented ? '0' : '1';
-    return complemented ? '(' + parts.join(' + ') + ')' : parts.join('');
+    /* Bare concatenation is only readable when every name is one character;
+       with longer names 'AB~AB' reparses as AB AND ~AB. */
+    var sep = names.some(function (n) { return n.length > 1; }) ? ' & ' : '';
+    return complemented ? '(' + parts.join(' + ') + ')' : parts.join(sep);
   }
 
   function buildSolution(imp, kind, names, numVars) {
@@ -749,8 +804,15 @@
     essential.forEach(function (p) { p.minterms.forEach(function (m) { covered.add(m); }); });
     var remaining = on.filter(function (m) { return !covered.has(m); });
     var sopChosen = essential.slice();
+    var sopOptimal = true;
     if (remaining.length) {
-      minimumCover(sopPrimes, remaining).forEach(function (p) { sopChosen.push(p); });
+      try {
+        minimumCover(sopPrimes, remaining).forEach(function (p) { sopChosen.push(p); });
+      } catch (err) {
+        if (!(err && /budget exceeded/.test(err.message))) throw err;
+        sopOptimal = false;
+        greedyCover(sopPrimes, remaining).forEach(function (p) { sopChosen.push(p); });
+      }
     }
     sopChosen = dedupeImplicants(sopChosen);
 
@@ -771,13 +833,24 @@
     posEssential.forEach(function (p) { p.minterms.forEach(function (m) { posCovered.add(m); }); });
     var posRemaining = zeros.filter(function (m) { return !posCovered.has(m); });
     var posChosen = posEssential.slice();
+    var posOptimal = true;
     if (posRemaining.length) {
-      minimumCover(posPrimes, posRemaining).forEach(function (p) { posChosen.push(p); });
+      try {
+        minimumCover(posPrimes, posRemaining).forEach(function (p) { posChosen.push(p); });
+      } catch (err) {
+        if (!(err && /budget exceeded/.test(err.message))) throw err;
+        posOptimal = false;
+        greedyCover(posPrimes, posRemaining).forEach(function (p) { posChosen.push(p); });
+      }
     }
     posChosen = dedupeImplicants(posChosen);
 
     var sop = metricsFor(sopChosen, 'SOP', names, numVars);
     var pos = metricsFor(posChosen, 'POS', names, numVars);
+    /* Honest optimality markers: false means the exact cover search exceeded
+       its budget and a greedy cover stands in (equivalence still verified). */
+    sop.optimal = sopOptimal;
+    pos.optimal = posOptimal;
     var sopOutputs = evaluateSolution(sopChosen, numVars, 'SOP', size);
     var posOutputs = evaluateSolution(posChosen, numVars, 'POS', size);
 
@@ -983,23 +1056,38 @@
     var state = new Map();
     var order = [];
     var stack = [];
-    function visit(id) {
-      var s = state.get(id);
-      if (s === 2) return;
-      if (s === 1) throw LogicError('combinational cycle detected: ' + stack.concat(id).join(' -> '));
-      state.set(id, 1);
-      stack.push(id);
-      var node = graph.byName.get(id);
-      if (!node.def.sequential && !node.virtual) {
-        node.inputs.forEach(function (wire) {
-          if (wire) visit(wire.node);
-        });
+    /* Iterative DFS: deep graphs overflow the call stack with recursion. */
+    graph.nodes.forEach(function (root) {
+      if (state.get(root.id) === 2) return;
+      state.set(root.id, 1);
+      stack.push(root.id);
+      var frames = [{ node: root, next: 0 }];
+      while (frames.length) {
+        var frame = frames[frames.length - 1];
+        var node = frame.node;
+        var deps = (!node.def.sequential && !node.virtual) ? node.inputs : [];
+        var pushed = false;
+        while (frame.next < deps.length) {
+          var wire = deps[frame.next];
+          frame.next += 1;
+          if (!wire) continue;
+          var s = state.get(wire.node);
+          if (s === 2) continue;
+          if (s === 1) throw LogicError('combinational cycle detected: ' + stack.concat(wire.node).join(' -> '));
+          state.set(wire.node, 1);
+          stack.push(wire.node);
+          frames.push({ node: graph.byName.get(wire.node), next: 0 });
+          pushed = true;
+          break;
+        }
+        if (!pushed) {
+          frames.pop();
+          stack.pop();
+          state.set(node.id, 2);
+          order.push(node);
+        }
       }
-      stack.pop();
-      state.set(id, 2);
-      order.push(node);
-    }
-    graph.nodes.forEach(function (n) { visit(n.id); });
+    });
     return order;
   }
 
@@ -1008,21 +1096,36 @@
     var allCycles = [];
     var state = new Map();
     var path = [];
-    function dfs(id) {
-      if (state.get(id) === 2) return;
-      if (state.get(id) === 1) {
-        var start = path.indexOf(id);
-        allCycles.push(path.slice(start).concat(id));
-        return;
+    /* Iterative DFS: deep graphs overflow the call stack with recursion. */
+    graph.nodes.filter(function (n) { return !n.virtual; }).forEach(function (root) {
+      if (state.get(root.id) === 2) return;
+      state.set(root.id, 1);
+      path.push(root.id);
+      var frames = [{ node: root, next: 0 }];
+      while (frames.length) {
+        var frame = frames[frames.length - 1];
+        var deps = frame.node.inputs;
+        var pushed = false;
+        while (frame.next < deps.length) {
+          var w = deps[frame.next];
+          frame.next += 1;
+          if (!w) continue;
+          var s = state.get(w.node);
+          if (s === 2) continue;
+          if (s === 1) { allCycles.push(path.slice(path.indexOf(w.node)).concat(w.node)); continue; }
+          state.set(w.node, 1);
+          path.push(w.node);
+          frames.push({ node: graph.byName.get(w.node), next: 0 });
+          pushed = true;
+          break;
+        }
+        if (!pushed) {
+          frames.pop();
+          path.pop();
+          state.set(frame.node.id, 2);
+        }
       }
-      state.set(id, 1);
-      path.push(id);
-      var n = graph.byName.get(id);
-      if (!n.virtual) n.inputs.forEach(function (w) { if (w) dfs(w.node); });
-      path.pop();
-      state.set(id, 2);
-    }
-    graph.nodes.filter(function (n) { return !n.virtual; }).forEach(function (n) { dfs(n.id); });
+    });
     var combCycles = [];
     try { combinationalOrder(graph); }
     catch (err) { combCycles.push(err.message); }
@@ -1072,7 +1175,7 @@
       });
     });
     dffs.forEach(function (n) {
-      if (!n.inputs[0]) hazards.push({ cycle: null, type: 'undriven-input', node: n.id, port: 0, message: 'register ' + n.id + ' D input has no driver and holds ' + n.init });
+      if (!n.inputs[0]) hazards.push({ cycle: null, type: 'undriven-input', node: n.id, port: 0, message: 'register ' + n.id + ' D input has no driver and reads 0' });
     });
     var maxSteps = opts.maxSteps == null ? 200 : opts.maxSteps;
     if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 10000) throw LogicError('maxSteps must be an integer between 1 and 10000');
@@ -1090,7 +1193,7 @@
         var name = typeof inp === 'string' ? inp : inp.name;
         var v;
         if (typeof vector === 'number') v = (vector >> (inputs.length - 1 - idx)) & 1;
-        else if (Array.isArray(vector)) v = vector[idx];
+        else if (Array.isArray(vector) || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(vector) && typeof vector.length === 'number')) v = vector[idx];
         else if (vector && typeof vector === 'object') v = vector[name] != null ? vector[name] : (vector[keyOf(name)] != null ? vector[keyOf(name)] : 0);
         else throw LogicError('input vector must be a number, array or object');
         if (v === 'x' || v === 'X' || v == null) v = 0;
@@ -1190,14 +1293,19 @@
   }
 
   function buildWaveform(cycles, inputs, outputs) {
-    var names = inputs.map(function (i) { return typeof i === 'string' ? i : i.name; })
-      .concat(outputs.map(function (o) { return o.name || (o.node + '_' + o.port); }));
+    /* Keep each signal's source: an output row that shares a name with an
+       input must still read the output bag, not the input's values. */
+    var named = inputs.map(function (i) {
+      return { name: typeof i === 'string' ? i : i.name, bag: 'inputs' };
+    }).concat(outputs.map(function (o) {
+      return { name: o.name || (o.node + '_' + o.port), bag: 'outputs' };
+    }));
     return {
-      signals: names.map(function (name) {
+      signals: named.map(function (s) {
         return {
-          name: name,
+          name: s.name,
           values: cycles.map(function (c) {
-            return c.inputs[name] != null ? c.inputs[name] : (c.outputs[name] != null ? c.outputs[name] : 0);
+            return c[s.bag][s.name] != null ? c[s.bag][s.name] : 0;
           })
         };
       }),

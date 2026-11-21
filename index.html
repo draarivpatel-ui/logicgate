@@ -18,7 +18,7 @@
       <div class="header-actions">
         <span class="instrument-readout" title="Zero network requests, zero runtime dependencies">Runs entirely on your device</span>
         <button type="button" id="themeToggle" class="btn" aria-pressed="true" title="Switch color theme">Light theme</button>
-        <button type="button" id="helpToggle" class="btn" aria-expanded="false">Quick reference</button>
+        <button type="button" id="helpToggle" class="btn" aria-expanded="false" aria-controls="helpPanel">Quick reference</button>
       </div>
     </header>
 
@@ -36,6 +36,10 @@
         <div>
           <h3>0.3 IEEE 1364-2001 Verilog Verification</h3>
           <p>Download or copy the synthesizable Verilog module and self-checking testbench. Compile and verify locally with Icarus Verilog: <code>iverilog -g2001 -o sim.vvp module.v module_tb.v &amp;&amp; vvp sim.vvp</code>.</p>
+        </div>
+        <div>
+          <h3>0.4 Keyboard Controls</h3>
+          <p>Arrow keys move between Karnaugh map cells, and Enter or Space inspects a waveform vector. The Keyboard shortcuts switch under the map turns all of them off without losing pointer control.</p>
         </div>
       </div>
     </section>
@@ -113,7 +117,7 @@
       </aside>
 
       <section class="content">
-        <div class="stat-row" id="statRow" aria-label="Synthesis characteristics"></div>
+        <div class="stat-row" id="statRow" role="group" aria-label="Synthesis characteristics"></div>
         <section class="proof-strip" aria-label="Live equivalence checks"><div id="verificationBadges" role="status"></div><button type="button" class="btn btn-sm" id="downloadProof">Download proof JSON</button></section>
         <section class="panel probe-panel" aria-label="Signal inspector"><div class="panel-head"><h2>Follow a signal</h2><span class="badge" id="probeVector">Vector 0</span></div><div id="probeInputs" class="probe-inputs"></div><output id="probeReadout" aria-live="polite"></output><p class="field-note">Toggle inputs, hover a map cell, or use arrow keys. Enter or Space edits the focused map cell.</p><p id="hazardReadout" class="field-note"></p></section>
 
@@ -132,6 +136,7 @@
             <div class="group-toggle">
               <label class="check"><input type="checkbox" id="showGroups" checked> Show prime implicant index markers</label>
               <label class="check"><input type="checkbox" id="showTexture"> Crosshatch prime cube overlays</label>
+              <label class="check"><input type="checkbox" id="keyShortcuts" checked> Keyboard shortcuts</label>
             </div>
           </div>
 

@@ -31,14 +31,14 @@ The carry scenario displays and exports a four-input upper slice with C2=1. Its 
 Node.js 22 or newer:
 
 ```sh
-node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js adversarial-test.js
+npm test
 ```
 
-The verified suite contains **150 tests**: 53 original engine checks, 21 regression and oracle checks, 32 Verilog consumer checks, 25 DOM interaction checks and 19 adversarial checks covering parser depth limits, sequential DFF timing oracles, undriven-pin reporting and UI hygiene invariants. The local run passed with **0 failures and 0 skipped tests**.
+The verified suite contains **219 tests**: 53 original engine checks, 21 regression and oracle checks, 48 Verilog consumer checks, 25 DOM interaction checks, 19 adversarial checks covering parser depth limits, sequential DFF timing oracles, undriven-pin reporting and UI hygiene invariants, and 53 revamp audit checks covering exhaustive prime-set oracles, exact-cover cost oracles, deep netlist recursion, typed input vectors, waveform naming collisions, the WCAG 2.1.4 keyboard-shortcut toggle and focus guards. The local run passed with **0 failures and 0 skipped tests**.
 
 The original oracle suite covers all 81 disjoint care/don't-care specifications for two variables, every three-variable Boolean function, 256 three-variable functions with selected don't cares and 96 four-variable samples. A separate cube oracle checks both term and literal optimality for all 256 three-variable functions.
 
-The Verilog consumer suite invokes installed `iverilog -g2001` and `vvp` for 32 SOP/POS modules and their exhaustive testbenches, including reserved words and collisions with testbench identifiers. These consumer checks are reported as skipped when Icarus Verilog is unavailable. The Node engine and DOM suites remain dependency free.
+The Verilog consumer suite invokes installed `iverilog -g2001` and `vvp` for 48 SOP/POS modules and their exhaustive testbenches, including reserved words and collisions with testbench identifiers. These consumer checks are reported as skipped when Icarus Verilog is unavailable. The Node engine and DOM suites remain dependency free.
 
 DOM tests compile and execute the actual scripts against the shipped HTML using a deterministic local adapter. They cover startup, every preset, editing, focus preservation, keyboard inspection, malformed inputs, exports, clipboard handling and theme state. This is a controller check, not a browser layout screenshot.
 
@@ -55,7 +55,7 @@ DOM tests compile and execute the actual scripts against the shipped HTML using 
 
 Precedence is complement, AND/NAND, XOR/XNOR, then OR/NOR. `A !B` means `A & !B`; only a prime is a postfix complement. Names are case insensitive and must be unique. Boolean operator words cannot be variable names.
 
-The map supports two to four inputs. The engine supports one to sixteen inputs with explicit resource budgets of 2,000,000 prime comparisons and 200,000 cover search states. Budget exhaustion throws an actionable error instead of returning an approximate result. Fully specified sixteen-input constants use a direct fast path.
+The map supports two to four inputs. The engine supports one to sixteen inputs with explicit resource budgets of 2,000,000 prime merge checks, 200,000 cover search states and four seconds per cover. A cover chart that outgrows its budget returns a deterministic greedy cover instead of throwing; the result still matches every care input but flags the unproven cost as `sop.optimal` or `pos.optimal` set to `false`, so readers must check those flags before claiming a certified minimum. Prime-generation exhaustion still throws an actionable error. Fully specified sixteen-input constants use a direct fast path.
 
 ## Export and independent hardware simulation
 
@@ -87,6 +87,7 @@ The testbench prints `ALL 8 VECTORS PASS` after exhaustive verification. Don't-c
 | `export-test.js` | Real Verilog-2001 compiler and simulation checks |
 | `adversarial-test.js` | Depth limits, DFF timing oracles, undriven-pin warnings, UI fences |
 | `ui-test.js`, `dom-harness.js` | Actual controller behavior with deterministic DOM and canvas adapters |
+| `revamp-test.js` | Independent prime-set and cover-cost oracles, simulation and accessibility fences |
 
 ## Scope and next steps
 
