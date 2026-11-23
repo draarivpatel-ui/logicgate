@@ -12,6 +12,10 @@ Five one-click challenges show the engineering immediately: a cyclic cover that 
 
 The exported module comes with an exhaustive Verilog-2001 testbench. A downloadable proof report includes the actual care set, both synthesized forms, their equivalence results and the static hazard analysis.
 
+A timing and hazard lab adds five gate-level benchmark circuits: a full adder, a 4:1 mux, a 2-bit magnitude comparator, a 4-bit parity tree and a consensus-term glitch demo. Each runs an exhaustive truth-table equivalence check, a gate-level critical-path propagation delay with `f_max = 1 / t_pd`, a transport-delay simulation that draws the exact glitch interval on an interactive SVG waveform, and a structural Verilog export of real `not`/`and`/`or`/`xor` primitive instantiations with a self-checking testbench. Every delay is a nominal transport delay labeled as illustrative, not a device measurement.
+
+Verification exports carry a FIPS 180-4 SHA-256 tamper-detection digest computed in pure JavaScript, honestly labeled as unkeyed integrity protection rather than a signature. CSV cells are escaped against spreadsheet formula injection. A strict `#lg=` URL hash bookmarks the full specification, benchmark and chosen transition, and an in-page self-test panel re-proves the engine against itself in the visitor's own browser.
+
 ## How we built it
 
 The standalone JavaScript kernel runs unchanged in the browser and Node. A recursive-descent parser feeds truth tables. Quine-McCluskey creates prime cubes, and a memoized branch-and-bound cover solver chooses the fewest terms and then the fewest literals. BigInt coverage columns preserve every required state in large charts.
@@ -34,29 +38,38 @@ Invalid input could silently drop a minterm or leave a previous circuit download
 - True four-bit lookahead carry is checked against addition for all 512 vectors.
 - Every export is parsed back and compared with its care states before the interface reports a pass.
 - Thirty-two actual Verilog modules and their exhaustive testbenches compile and run with `iverilog -g2001` and `vvp`.
+- Five structural benchmark netlists additionally compile and simulate every input vector under Icarus, emitted as real gate primitives rather than continuous assignments.
+- The consensus demo's transport-delay model reproduces the exact 2 ns glitch window the missing consensus cube predicts, then proves the repaired cone clean.
+- The browser self-test panel runs 16 checks including three published SHA-256 known-answer vectors, De Morgan equivalences, an XOR built purely from NAND gates, Quine-McCluskey agreement on every minterm and a live tamper-detection replay.
 
 ## Verification numbers
 
 Verified on Node v26.8.1 with:
 
 ```sh
-node --test --test-reporter=spec test.js regression-test.js export-test.js ui-test.js adversarial-test.js
+npm test
 ```
 
-**150 passed, 0 failed, 0 skipped.**
+**622 passed, 0 failed, 0 skipped.**
 
 | Check | Verified coverage |
 | --- | --- |
 | Engine and regression tests | 74 |
 | Adversarial depth, sequential and UI-fence checks | 19 |
-| Independent Verilog compiler/simulator checks | 32 |
+| Independent Verilog compiler/simulator checks | 48 |
 | DOM interaction tests | 25 |
+| Revamp oracle and accessibility checks | 53 |
+| Timing, hazard, structural and integrity lab checks | 403 |
 | Two-variable care specifications | All 81 disjoint on/don't-care combinations |
 | Three-variable Boolean functions | All 256, with an independent term/literal oracle |
+| Lab two-variable functions | All 16 |
+| Lab three-variable functions | All 256 |
 | Selected three-variable don't-care cases | 256 |
-| Sampled four-variable don't-care cases | 96 |
+| Sampled four-variable cases | 96 engine + 32 lab |
 | Lookahead network sweep | 512 input vectors |
 | Large cyclic cover regression | 48 nonessential care columns |
+| SHA-256 known-answer vectors | NIST 0/1/56/112-byte messages plus crypto-oracle cross-checks |
+| Benchmark transitions scanned | All single-input transitions per circuit (24 to 64 vectors each) |
 | Captured DOM console/reference errors | 0 |
 
 Logical equivalence uses binary inputs and the explicit care mask. The displayed timing model is illustrative; dynamic device timing and physical hardware are outside this verification.
@@ -67,4 +80,4 @@ Sequential RTL export, editable gate netlists, technology-specific cost models a
 
 ## Judge demo
 
-Open [LogicGate](https://aariv.me/logicgate/), choose **Find the hidden hazard**, and probe m3 and m7. Choose **Verify all 512 vectors** to inspect the arithmetic oracle result. Download a module, testbench and proof JSON to take the experiment beyond the page.
+Open [LogicGate](https://aariv.me/logicgate/), choose **Find the hidden hazard**, and probe m3 and m7. In the timing lab, pick the Consensus demo and watch the A: m7 to m3 transition draw the red 6-8 ns glitch band while the repaired output stays clean. Choose **Verify all 512 vectors** to inspect the arithmetic oracle result, run the self-test panel, then download a structural module, testbench and checksummed report to take the experiment beyond the page.

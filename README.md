@@ -25,6 +25,12 @@ The carry scenario displays and exports a four-input upper slice with C2=1. Its 
 - Verilog-2001 identifiers, collision-safe ports and testbench locals, don't-care masking and matched module/testbench filenames.
 - Input toggles, map and waveform inspection, keyboard map navigation, persistent light/dark themes, labeled controls and visible validation failures.
 - Invalid input disables stale exports until a valid specification is applied.
+- Timing and hazard lab: exhaustive truth-table equivalence for up to six inputs, a gate-level critical path with `f_max = 1 / t_pd`, a transport-delay event simulator that reproduces the exact glitch interval, and a static hazard scan over every single-input transition on five benchmark circuits (full adder, 4:1 mux, 2-bit magnitude comparator, 4-bit parity tree, consensus-term demo).
+- Structural Verilog export for the benchmarks: real `not`/`and`/`or`/`xor` primitive instantiations with `` `default_nettype none`` plus a self-checking testbench, verified to compile and simulate under Icarus Verilog.
+- SHA-256 checksummed verification reports in JSON, CSV and Markdown. The digest is a FIPS 180-4 SHA-256 over canonical JSON and is labeled an unkeyed tamper-detection digest, not a signature. CSV cells are escaped against formula injection.
+- Strict `#lg=` URL-hash bookmarking restores the specification, benchmark and chosen transition; malformed hashes are ignored with a visible notice instead of a crash.
+- In-page self-tests prove the workbench against itself: SHA-256 known-answer vectors, De Morgan and XOR/NAND equivalence, Quine-McCluskey agreement on every minterm, the critical-path bound, consensus hazard elimination, CSV escaping, tamper detection and bookmark round-trips.
+- All lab delays are nominal transport delays (NOT/BUF/NAND/NOR 2 ns, AND/OR 3 ns, XOR/XNOR 4 ns, MUX2 5 ns) chosen for readability, not device measurements; the UI states this beside every diagram.
 
 ## Verification
 
@@ -34,7 +40,7 @@ Node.js 22 or newer:
 npm test
 ```
 
-The verified suite contains **219 tests**: 53 original engine checks, 21 regression and oracle checks, 48 Verilog consumer checks, 25 DOM interaction checks, 19 adversarial checks covering parser depth limits, sequential DFF timing oracles, undriven-pin reporting and UI hygiene invariants, and 53 revamp audit checks covering exhaustive prime-set oracles, exact-cover cost oracles, deep netlist recursion, typed input vectors, waveform naming collisions, the WCAG 2.1.4 keyboard-shortcut toggle and focus guards. The local run passed with **0 failures and 0 skipped tests**.
+The verified suite contains **622 tests**: 53 original engine checks, 21 regression and oracle checks, 48 Verilog consumer checks, 25 DOM interaction checks, 19 adversarial checks covering parser depth limits, sequential DFF timing oracles, undriven-pin reporting and UI hygiene invariants, 53 revamp audit checks covering exhaustive prime-set oracles, exact-cover cost oracles, deep netlist recursion, typed input vectors, waveform naming collisions, the WCAG 2.1.4 keyboard-shortcut toggle and focus guards, and 403 lab checks covering FIPS 180-4 SHA-256 known-answer vectors cross-checked against the Node crypto oracle, benchmark equivalence oracles, Quine-McCluskey agreement across all 16 two-variable and all 256 three-variable functions plus strided four-variable samples, hand-computed critical paths, constructed static-0/static-1/dynamic glitch intervals, structural Verilog compiled and simulated by Icarus, CSV injection safety, strict bookmark codecs and DOM controller checks. The local run passed with **0 failures and 0 skipped tests**.
 
 The original oracle suite covers all 81 disjoint care/don't-care specifications for two variables, every three-variable Boolean function, 256 three-variable functions with selected don't cares and 96 four-variable samples. A separate cube oracle checks both term and literal optimality for all 256 three-variable functions.
 
@@ -81,13 +87,15 @@ The testbench prints `ALL 8 VECTORS PASS` after exhaustive verification. Don't-c
 | File | Responsibility |
 | --- | --- |
 | `logic.js` | Parser, exact synthesis, hazards, netlist simulation, Verilog and proof exporters |
-| `app.js` | Specification editing, visualization, inspection and downloads |
+| `logic-lab.js` | Benchmark circuits, equivalence oracles, transport-delay glitch simulation, critical paths, structural Verilog, SHA-256 reports, bookmark codec, self-tests |
+| `app.js` | Specification editing, visualization, inspection, lab diagrams and downloads |
 | `index.html`, `style.css` | Accessible responsive workbench and themes |
 | `test.js`, `regression-test.js` | Engine invariants and independent optimality oracles |
 | `export-test.js` | Real Verilog-2001 compiler and simulation checks |
 | `adversarial-test.js` | Depth limits, DFF timing oracles, undriven-pin warnings, UI fences |
 | `ui-test.js`, `dom-harness.js` | Actual controller behavior with deterministic DOM and canvas adapters |
 | `revamp-test.js` | Independent prime-set and cover-cost oracles, simulation and accessibility fences |
+| `lab-test.js` | Lab oracles: SHA-256 KATs, equivalence, QM coverage, timing, glitch intervals, structural RTL, reports, bookmarks, DOM checks |
 
 ## Scope and next steps
 

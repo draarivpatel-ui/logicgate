@@ -145,6 +145,16 @@ table.data.no-highlight tr td { background:transparent; color:var(--text-primary
 pre.code { margin:0; padding:15px; max-height:300px; overflow:auto; border:1px solid var(--border-soft); border-radius:6px; background:var(--surface-0); color:var(--text-primary); font:11px/1.65 var(--mono); }
 .footer { display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; padding:22px 0 0; color:var(--text-muted); font-size:11px; }
 .toast { position:fixed; right:18px; bottom:18px; z-index:30; padding:12px 18px; border:1px solid var(--accent); border-radius:6px; background:var(--surface-1); color:var(--text-primary); font-size:12px; box-shadow:0 8px 28px #0003; }
+.lab-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.lab-stats { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); border:1px solid var(--border); border-radius:8px; background:var(--surface-2); overflow:hidden; margin-bottom:12px; }
+.lab-stats .stat-tile { padding:10px 10px; }
+.lab-stats .stat-tile .value { font-size:16px; }
+#labHazard { margin-bottom:6px; }
+#selfTestList { display:flex; flex-direction:column; gap:5px; max-height:340px; overflow:auto; }
+#selfTestList .prime-row { grid-template-columns:10px minmax(0,1fr) auto; }
+#selfTestList .tag.is-fail { color:var(--serious); }
+@media(max-width:900px) { .lab-controls { grid-template-columns:minmax(0,1fr); } .lab-stats { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(max-width:560px) { .lab-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:1200px) { .two-col,.schematic-waveform-grid { grid-template-columns:minmax(0,1fr); } .showcase { grid-template-columns:repeat(3,minmax(0,1fr)); } .stat-row { grid-template-columns:repeat(3,minmax(0,1fr)); } .stat-tile { border-bottom:1px solid var(--border-soft); } }
 @media(max-width:900px) { .workspace { grid-template-columns:minmax(0,1fr); } .controls { position:static; max-height:none; } .showcase { grid-template-columns:repeat(2,minmax(0,1fr)); } .datasheet-header { flex-direction:column; align-items:flex-start; } .header-actions { max-width:none; } .instrument-readout { width:auto; } .help-grid { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:560px) { .showcase { grid-template-columns:minmax(0,1fr); } .code-grid { grid-template-columns:minmax(0,1fr); } .stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } .panel { padding:14px; } .kmap-cell { width:56px; height:54px; } }

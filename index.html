@@ -209,6 +209,48 @@
           </div>
           <p class="field-note" id="exportStatus" role="status"></p>
         </div>
+
+        <div class="panel" id="labPanel">
+          <div class="panel-head">
+            <h2>Time the gates and catch the glitch</h2>
+            <div class="btn-row">
+              <button type="button" id="bookmarkCopy" class="btn btn-sm">Copy bookmark link</button>
+            </div>
+          </div>
+          <div class="lab-controls">
+            <label class="field" for="benchSelect">
+              <span>Benchmark circuit</span>
+              <select id="benchSelect"></select>
+            </label>
+            <label class="field" for="transitionSelect">
+              <span>Probe an input transition</span>
+              <select id="transitionSelect"></select>
+            </label>
+          </div>
+          <p class="field-note" id="benchDescription"></p>
+          <div class="lab-stats" id="labStats" role="group" aria-label="Timing analysis"></div>
+          <div id="labHazard"></div>
+          <h3 class="subhead">Transport-delay timing waveform</h3>
+          <div class="svg-host" id="timingSvg"></div>
+          <p class="field-note">Each gate commits one nominal delay after its input event; pulses propagate in full (transport model). Nominal delays are illustrative, not a device measurement.</p>
+          <div class="btn-row">
+            <button type="button" id="labVerilog" class="btn btn-sm">Download structural .v</button>
+            <button type="button" id="labVerilogTb" class="btn btn-sm">Download _tb.v</button>
+            <button type="button" id="labReportJson" class="btn btn-sm">Report .json + SHA-256</button>
+            <button type="button" id="labReportCsv" class="btn btn-sm">Report .csv</button>
+            <button type="button" id="labReportMd" class="btn btn-sm">Report .md</button>
+          </div>
+          <p class="field-note" id="labStatus" role="status"></p>
+        </div>
+
+        <div class="panel" id="selfTestPanel">
+          <div class="panel-head">
+            <h2>Prove it in the browser</h2>
+            <button type="button" id="runSelfTests" class="btn btn-primary btn-sm">Run self-tests</button>
+          </div>
+          <p class="field-note" id="selfTestSummary">Engine, timing model, digests and codecs checked live in this page.</p>
+          <div id="selfTestList" role="status"></div>
+        </div>
       </section>
     </main>
 
@@ -221,6 +263,7 @@
   <noscript><p>Enable JavaScript to use the local synthesis engine.</p></noscript>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <script src="logic.js"></script>
+  <script src="logic-lab.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

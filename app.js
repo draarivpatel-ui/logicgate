@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   var LG = window.LogicGate;
+  var LAB = window.LogicLab || null;
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var SERIES = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5', '--series-6', '--series-7', '--series-8'];
   var MAX_GROUPS = 8;
@@ -26,6 +27,10 @@
   state.inputError = '';
   /* WCAG 2.1.4: every app keyboard shortcut can be switched off. */
   state.mapKeys = true;
+  /* Timing & hazard lab: active benchmark, chosen transition, cached analysis. */
+  state.bench = 'consensusDemo';
+  state.transition = null;
+  state.labRun = null;
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {};
@@ -37,7 +42,10 @@
     'schematicSvg', 'waveformSvg', 'copyModule', 'copyTb', 'downloadModule', 'downloadTb',
     'moduleFilename', 'tbFilename', 'moduleCode', 'tbCode', 'exportStatus', 'toast', 'varCountLabel',
     'verificationBadges', 'downloadProof', 'probeInputs', 'probeReadout', 'probeVector', 'hazardReadout',
-    'keyShortcuts'
+    'keyShortcuts',
+    'labPanel', 'benchSelect', 'transitionSelect', 'benchDescription', 'labStats', 'labHazard',
+    'timingSvg', 'labVerilog', 'labVerilogTb', 'labReportJson', 'labReportCsv', 'labReportMd',
+    'labStatus', 'bookmarkCopy', 'selfTestPanel', 'runSelfTests', 'selfTestSummary', 'selfTestList'
   ].forEach(function (id) { el[id] = $(id); });
 
   function esc(text) {
@@ -787,6 +795,328 @@
     ta.remove();
   }
 
+  /* ---------------- Timing & hazard lab ---------------- */
+
+  var labBenchList = null;
+  function labBenches() {
+    if (!labBenchList) labBenchList = LAB ? LAB.benchmarks() : [];
+    return labBenchList;
+  }
+
+  function currentBench() {
+    var list = labBenches();
+    var hit = list.filter(function (b) { return b.id === state.bench; })[0];
+    return hit || list[0] || null;
+  }
+
+  function signalLabel(signal) {
+    if (signal.indexOf('IN:') === 0) return signal.slice(3, signal.lastIndexOf(':'));
+    var node = signal.slice(0, signal.lastIndexOf(':'));
+    var port = signal.slice(signal.lastIndexOf(':') + 1);
+    return node + (port === 'y' ? '' : '.' + port);
+  }
+
+  function initLab() {
+    if (!LAB) {
+      if (el.labPanel) el.labPanel.hidden = true;
+      if (el.selfTestPanel) el.selfTestPanel.hidden = true;
+      return;
+    }
+    el.benchSelect.innerHTML = '';
+    labBenches().forEach(function (b) {
+      var opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = b.label;
+      el.benchSelect.appendChild(opt);
+    });
+    el.benchSelect.value = currentBench().id;
+    runLab();
+  }
+
+  /* The whole lab pass: exhaustive equivalence per output, the critical
+     path and its f_max, then the full single-input transition scan. */
+  function runLab() {
+    var bench = currentBench();
+    if (!bench) return;
+    state.bench = bench.id;
+    el.benchSelect.value = bench.id;
+    el.benchDescription.textContent = bench.summary;
+    try {
+      var analysis = LAB.analyzeBenchmark(bench);
+      analysis.structural = LAB.exportStructuralVerilog(bench.netlist, {
+        moduleName: bench.id.replace(/[^A-Za-z0-9_]/g, '_'),
+        spec: { expected: expectedMinterms(bench) }
+      });
+      state.labRun = analysis;
+      renderLabStats(analysis);
+      renderLabHazards(analysis);
+      populateTransitions(analysis, bench);
+      runTransition();
+    } catch (err) {
+      state.labRun = null;
+      setStatus(el.labStatus, err.message, 'error');
+    }
+  }
+
+  function expectedMinterms(bench) {
+    var out = {};
+    bench.outputNames.forEach(function (name) { out[name] = bench.spec[name].minterms; });
+    return out;
+  }
+
+  function renderLabStats(analysis) {
+    var t = analysis.timing;
+    var eq = analysis.equivalence;
+    var allEq = Object.keys(eq).every(function (k) { return eq[k].pass; });
+    var tiles = [
+      { label: 'Equivalence', value: allEq ? 'PASS' : 'FAIL', detail: Object.keys(eq).length + ' output(s), ' + eq[Object.keys(eq)[0]].vectors + ' vectors each' },
+      { label: 't_pd', value: t.delayNs + ' ns', detail: t.levels + ' gate levels to ' + t.longestOutput },
+      { label: 'f_max', value: t.fMaxMHz == null ? 'wire' : (t.fMaxMHz >= 10 ? t.fMaxMHz.toFixed(1) : t.fMaxMHz.toFixed(2)) + ' MHz', detail: '1 / t_pd, illustrative model' },
+      { label: 'Gates', value: String(analysis.structural.primitiveCount), detail: 'structural primitives' },
+      { label: 'Transitions', value: String(analysis.hazards.checkedTransitions), detail: 'single-input, both directions' },
+      { label: 'Hazards', value: String(analysis.hazards.hazards.length), detail: analysis.hazards.hazards.length ? 'glitch-capable transitions' : 'all clean' }
+    ];
+    el.labStats.innerHTML = tiles.map(function (t2) {
+      return '<div class="stat-tile"><div class="label">' + esc(t2.label) + '</div>' +
+        '<div class="value">' + esc(t2.value) + '</div><div class="detail">' + esc(t2.detail) + '</div></div>';
+    }).join('');
+  }
+
+  function renderLabHazards(analysis) {
+    var hazards = analysis.hazards.hazards;
+    if (!hazards.length) {
+      el.labHazard.innerHTML = '<p class="field-note is-ok">No static or dynamic hazards: all ' + analysis.hazards.checkedTransitions + ' single-input transitions settle monotonically.</p>';
+      return;
+    }
+    var rows = hazards.slice(0, 12).map(function (h) {
+      var span = h.glitchStartNs != null ? 'glitch t=' + h.glitchStartNs + '&ndash;' + (h.glitchEndNs != null ? h.glitchEndNs : '?') + ' ns' : 'non-monotone excursion';
+      return '<div class="prime-row is-essential"><i class="dot" style="background:var(--serious)"></i>' +
+        '<span class="term">' + esc(h.input) + ': m' + h.fromVector + ' &rarr; m' + h.toVector + ' &middot; ' + esc(h.output) + ' ' + esc(h.type) + ' &middot; ' + span + '</span>' +
+        '<span class="tag">glitch</span></div>';
+    }).join('');
+    el.labHazard.innerHTML = rows +
+      (hazards.length > 12 ? '<p class="field-note">+' + (hazards.length - 12) + ' more hazard-capable transitions not shown.</p>' : '');
+  }
+
+  /* Transition chooser: the benchmark default, every hazard found, and a few
+     clean transitions for contrast. */
+  function populateTransitions(analysis, bench) {
+    var seen = {};
+    var choices = [];
+    function add(input, vector, kind) {
+      var key = input + ':' + vector;
+      if (seen[key]) return;
+      seen[key] = true;
+      choices.push({ input: input, vector: vector, kind: kind });
+    }
+    if (bench.defaultTransition) add(bench.defaultTransition.input, bench.defaultTransition.vector, 'default');
+    analysis.hazards.hazards.forEach(function (h) { add(h.input, h.fromVector, h.type); });
+    bench.inputs.forEach(function (name, i) {
+      add(name, 0, 'probe');
+      if (choices.length < 26) add(name, (1 << bench.numVars) - 1, 'probe');
+    });
+    el.transitionSelect.innerHTML = '';
+    choices.slice(0, 40).forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c.input + '|' + c.vector;
+      var to = c.vector ^ (1 << (bench.numVars - 1 - bench.inputs.indexOf(c.input)));
+      opt.textContent = c.input + ': m' + c.vector + ' \u2192 m' + to + (c.kind !== 'probe' ? ' (' + c.kind + ')' : '');
+      el.transitionSelect.appendChild(opt);
+    });
+    var wanted = state.transition && state.transition.input != null ? state.transition.input + '|' + state.transition.vector : null;
+    el.transitionSelect.value = wanted && choices.some(function (c) { return c.input + '|' + c.vector === wanted; }) ? wanted : choices[0].input + '|' + choices[0].vector;
+  }
+
+  function runTransition() {
+    var bench = currentBench();
+    if (!bench || !state.labRun) return;
+    var parts = el.transitionSelect.value.split('|');
+    var input = parts[0], vector = Number(parts[1]);
+    try {
+      var sim = LAB.transitionSim(bench.netlist, vector, input);
+      state.transition = { input: input, vector: vector };
+      renderTimingSvg(sim, bench);
+      var flagged = sim.outputs.filter(function (o) { return o.hazard; });
+      setStatus(el.labStatus, flagged.length
+        ? flagged.map(function (o) {
+            var g = o.glitch;
+            return o.output + ' ' + o.hazard + (g ? ' glitch t=' + g.startNs + '\u2013' + (g.endNs != null ? g.endNs : '?') + ' ns' : '');
+          }).join('  |  ') + '. Transport model, nominal delays.'
+        : 'Transition settles monotonically in ' + sim.tMaxNs + ' ns; no glitch on any output. Transport model, nominal delays.',
+        flagged.length ? 'error' : 'ok');
+    } catch (err) {
+      setStatus(el.labStatus, err.message, 'error');
+    }
+  }
+
+  /* Timing waveform: toggled input first, then every internal signal that
+     moves during the window, then the outputs with glitch bands in red. */
+  function renderTimingSvg(sim, bench) {
+    var tMax = Math.max(sim.tMaxNs, 1);
+    var rows = [];
+    var inputSignal = 'IN:' + sim.input + ':y';
+    rows.push({ label: sim.input + ' (input)', signal: inputSignal, color: cssVar('--accent') });
+    var outputSigs = {};
+    bench.netlist.outputs.forEach(function (o) { outputSigs[o.node + ':' + o.port] = true; });
+    var moving = sim.signals.filter(function (s) {
+      if (s === inputSignal || outputSigs[s]) return false;
+      var line = sim.timelines.get(s);
+      return line.length > 1;
+    }).slice(0, 6);
+    moving.forEach(function (s, i) { rows.push({ label: signalLabel(s), signal: s, color: groupColor(i + 1) }); });
+    bench.netlist.outputs.forEach(function (o, i) {
+      rows.push({ label: o.name, signal: o.node + ':' + o.port, color: cssVar('--series-3'), output: sim.outputs[i] });
+    });
+    var labelW = 96, px = Math.max(26, Math.min(44, 520 / (tMax + 2)));
+    var x0 = labelW + 8, top = 30, rowH = 34;
+    var w = x0 + (tMax + 2) * px + 16, h = top + rows.length * rowH + 30;
+    var root = makeSvg(w, h, 'Transport-delay timing waveform for ' + sim.input + ' transition', 'img');
+    root.appendChild(svg('text', { x: 10, y: 17, 'font-size': 11, class: 'secondary', 'font-weight': 700 },
+      sim.input + ': m' + sim.fromVector + ' \u2192 m' + sim.toVector + ' \u00b7 committed events vs time (ns)'));
+    for (var t = -1; t <= tMax + 1; t += 1) {
+      var gx = x0 + (t + 1) * px;
+      root.appendChild(svg('line', { x1: gx, y1: top - 6, x2: gx, y2: h - 24, stroke: cssVar('--border-soft'), 'stroke-width': 1 }));
+      root.appendChild(svg('text', { x: gx + px / 2, y: top - 9, 'text-anchor': 'middle', 'font-size': 9, class: 'mono-label muted' }, String(t < 0 ? '' : t)));
+    }
+    rows.forEach(function (row, ri) {
+      var baseY = top + ri * rowH + rowH - 9;
+      var highY = baseY - 16;
+      root.appendChild(svg('text', { x: 8, y: baseY - 4, 'font-size': 10.5, class: 'mono-label secondary' }, row.label));
+      root.appendChild(svg('line', { x1: x0, y1: baseY, x2: w - 12, y2: baseY, stroke: cssVar('--border-soft'), 'stroke-width': 1, 'stroke-dasharray': '2 3' }));
+      var line = sim.timelines.get(row.signal) || [{ t: -1, v: 0 }];
+      if (row.output && row.output.glitch) {
+        var g = row.output.glitch;
+        var gx1 = x0 + (g.startNs + 1) * px;
+        var gx2 = x0 + ((g.endNs != null ? g.endNs : tMax + 0.6) + 1) * px;
+        root.appendChild(svg('rect', { x: gx1, y: top + ri * rowH + 2, width: gx2 - gx1, height: rowH - 8, fill: cssVar('--serious'), 'fill-opacity': 0.14 }));
+        root.appendChild(svg('line', { x1: gx1, y1: top + ri * rowH + 2, x2: gx1, y2: top + (ri + 1) * rowH - 6, stroke: cssVar('--serious'), 'stroke-width': 1.4, 'stroke-dasharray': '3 2' }));
+        if (g.endNs != null) root.appendChild(svg('line', { x1: gx2, y1: top + ri * rowH + 2, x2: gx2, y2: top + (ri + 1) * rowH - 6, stroke: cssVar('--serious'), 'stroke-width': 1.4, 'stroke-dasharray': '3 2' }));
+        root.appendChild(svg('text', { x: (gx1 + gx2) / 2, y: top + ri * rowH - 2 < top + 12 ? top + ri * rowH + 10 : top + ri * rowH - 2, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 700, fill: cssVar('--serious') }, 'glitch'));
+      }
+      var path = [];
+      var yFor = function (v) { return v ? highY : baseY; };
+      path.push('M ' + x0 + ' ' + yFor(line[0].v));
+      line.forEach(function (pt, i2) {
+        if (i2 === 0) return;
+        var x = x0 + (pt.t + 1) * px;
+        path.push('H ' + x);
+        path.push('V ' + yFor(pt.v));
+      });
+      path.push('H ' + (w - 12));
+      var hazardStroke = row.output && row.output.glitch;
+      root.appendChild(svg('path', { d: path.join(' '), fill: 'none', stroke: hazardStroke ? cssVar('--serious') : row.color, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+      line.forEach(function (pt, i2) {
+        if (i2 === 0) return;
+        var x = x0 + (pt.t + 1) * px;
+        root.appendChild(svg('circle', { cx: x, cy: yFor(pt.v), r: 2.4, fill: row.output && row.output.glitch ? cssVar('--serious') : row.color, stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
+      });
+      if (row.output && row.output.dynamic) {
+        root.appendChild(svg('text', { x: w - 14, y: baseY - 4, 'text-anchor': 'end', 'font-size': 9.5, 'font-weight': 700, fill: cssVar('--warning') }, 'dynamic'));
+      }
+    });
+    var zx = x0 + px;
+    root.appendChild(svg('path', { d: 'M ' + zx + ' ' + (h - 22) + ' l -4 6 h 8 Z', fill: cssVar('--text-secondary') }));
+    root.appendChild(svg('text', { x: zx + 8, y: h - 14, 'font-size': 9.5, class: 'mono-label muted' }, 'input commits at t = 0; each gate commits one nominal delay later'));
+    replace(el.timingSvg, root);
+  }
+
+  /* ---------------- Lab exports, bookmark, self tests ---------------- */
+
+  function labReport() {
+    var bench = currentBench();
+    var a = state.labRun;
+    var checks = [];
+    Object.keys(a.equivalence).forEach(function (name) {
+      var eq = a.equivalence[name];
+      checks.push({ check: 'equivalence ' + name + ' vs spec minterms', result: eq.pass, detail: eq.checked + ' comparisons over ' + eq.vectors + ' vectors, ' + eq.mismatchCount + ' mismatches' });
+    });
+    checks.push({ check: 'critical path', result: true, detail: 't_pd ' + a.timing.delayNs + ' ns over ' + a.timing.levels + ' levels; f_max ' + (a.timing.fMaxMHz == null ? 'unbounded' : a.timing.fMaxMHz.toFixed(2) + ' MHz') + ' (illustrative)' });
+    checks.push({ check: 'static/dynamic hazard scan', result: a.hazards.hazards.length === 0, detail: a.hazards.hazards.length + ' hazard-capable transitions out of ' + a.hazards.checkedTransitions });
+    a.hazards.hazards.slice(0, 8).forEach(function (h) {
+      checks.push({ check: 'hazard ' + h.input + ' m' + h.fromVector + '->m' + h.toVector + ' ' + h.output, result: false, detail: h.type + (h.glitchStartNs != null ? ', glitch t=' + h.glitchStartNs + '-' + (h.glitchEndNs != null ? h.glitchEndNs : '?') + ' ns' : '') });
+    });
+    return LAB.buildReport({ circuit: { id: bench.id, label: bench.label, inputs: bench.inputs }, checks: checks });
+  }
+
+  function labDownload(kind) {
+    var a = state.labRun;
+    if (!a) return;
+    var bench = currentBench();
+    var report = labReport();
+    if (kind === 'verilog') download(a.structural.module, a.structural.filename);
+    else if (kind === 'tb') download(a.structural.testbench, a.structural.testbenchFilename);
+    else if (kind === 'json') download(LAB.exportReportJSON(report), bench.id + '_verification.json');
+    else if (kind === 'csv') download(LAB.reportCSV(report), bench.id + '_verification.csv');
+    else if (kind === 'md') download(LAB.reportMarkdown(report), bench.id + '_verification.md');
+  }
+
+  /* Strict #lg= bookmarks: encode the workbench spec plus lab context. */
+  function copyBookmark() {
+    if (!LAB) return;
+    try {
+      var hash = LAB.encodeBookmark({
+        numVars: state.numVars, vars: state.vars, minterms: state.minterms, dontCares: state.dontCares,
+        form: state.form, moduleName: state.moduleName, bench: state.bench, transition: state.transition
+      });
+      var hasLocation = typeof location !== 'undefined' && location && location.href;
+      var base = hasLocation ? location.href.split('#')[0] : 'https://aariv.me/logicgate/';
+      if (hasLocation) {
+        try { if (typeof history !== 'undefined' && history && history.replaceState) history.replaceState(null, '', base + hash); else location.hash = hash; }
+        catch (e) { location.hash = hash; }
+      }
+      copyText(base + hash, 'Bookmark link');
+    } catch (err) {
+      toast('Bookmark failed: ' + err.message);
+    }
+  }
+
+  function applyBookmark(decoded) {
+    state.numVars = decoded.numVars;
+    state.vars = decoded.vars.slice();
+    state.minterms = decoded.minterms;
+    state.dontCares = decoded.dontCares;
+    state.form = decoded.form;
+    state.moduleName = decoded.moduleName;
+    state.preset = '';
+    state.netlistResult = null;
+    if (decoded.bench && labBenches().some(function (b) { return b.id === decoded.bench; })) state.bench = decoded.bench;
+    if (decoded.transition && decoded.transition.input != null && Number.isInteger(decoded.transition.vector)) {
+      state.transition = { input: decoded.transition.input, vector: decoded.transition.vector };
+    }
+    syncInputs();
+    recompute();
+    if (LAB) runLab();
+    setStatus(el.exprStatus, 'Applied bookmarked specification.', 'ok');
+  }
+
+  function readLocationHash() {
+    if (typeof location !== 'undefined' && location && location.hash) return location.hash;
+    try { if (window.location && window.location.hash) return window.location.hash; } catch (e) { /* no location */ }
+    return '';
+  }
+
+  function runSelfTestsUi() {
+    if (!LAB) return;
+    el.selfTestList.innerHTML = '<p class="field-note">Running...</p>';
+    setTimeout(function () {
+      try {
+        var st = LAB.runSelfTests();
+        el.selfTestSummary.textContent = st.pass
+          ? st.passed + ' / ' + st.total + ' self-tests pass in this browser.'
+          : st.passed + ' / ' + st.total + ' pass, ' + st.failed + ' FAILED.';
+        el.selfTestSummary.className = 'field-note ' + (st.pass ? 'is-ok' : 'is-error');
+        el.selfTestList.innerHTML = st.results.map(function (r) {
+          return '<div class="prime-row"><i class="dot" style="background:' + (r.pass ? 'var(--good)' : 'var(--serious)') + '"></i>' +
+            '<span class="term"><strong>' + esc(r.name) + '</strong><br><span class="mins">' + esc(r.detail) + '</span></span>' +
+            '<span class="tag">' + (r.pass ? 'PASS' : 'FAIL') + '</span></div>';
+        }).join('');
+      } catch (err) {
+        el.selfTestSummary.textContent = 'Self-test harness failed: ' + err.message;
+        el.selfTestSummary.className = 'field-note is-error';
+      }
+    }, 20);
+  }
+
   /* ---------------- Events ---------------- */
 
   function onKmapClick(ev) {
@@ -1039,6 +1369,26 @@
     el.downloadProof.addEventListener('click', function () {
       download(LG.exportVerificationJSON({ numVars: state.numVars, vars: state.vars, minterms: state.minterms, dontCares: state.dontCares, form: state.form, moduleName: state.moduleName }), state.verilog.moduleName + '_proof.json');
     });
+    if (LAB) {
+      el.benchSelect.addEventListener('change', function () { state.bench = el.benchSelect.value; state.transition = null; runLab(); });
+      el.transitionSelect.addEventListener('change', runTransition);
+      el.labVerilog.addEventListener('click', function () { labDownload('verilog'); });
+      el.labVerilogTb.addEventListener('click', function () { labDownload('tb'); });
+      el.labReportJson.addEventListener('click', function () { labDownload('json'); });
+      el.labReportCsv.addEventListener('click', function () { labDownload('csv'); });
+      el.labReportMd.addEventListener('click', function () { labDownload('md'); });
+      el.bookmarkCopy.addEventListener('click', copyBookmark);
+      el.runSelfTests.addEventListener('click', runSelfTestsUi);
+      if (typeof window !== 'undefined' && window.addEventListener) {
+        window.addEventListener('hashchange', function () {
+          var h = readLocationHash();
+          if (h && h.indexOf('#lg=') === 0) {
+            try { applyBookmark(LAB.decodeBookmark(h)); }
+            catch (err) { setStatus(el.exprStatus, 'Bookmark ignored: ' + err.message, 'error'); }
+          }
+        });
+      }
+    }
   }
 
   function init() {
@@ -1056,7 +1406,18 @@
     el.themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
     try { state.mapKeys = localStorage.getItem('logicgate-mapkeys') !== '0'; } catch (error) { /* optional preference */ }
     el.keyShortcuts.checked = state.mapKeys;
-    loadPreset('sevenSegmentDecoder');
+    var fromHash = readLocationHash();
+    if (LAB && fromHash && fromHash.indexOf('#lg=') === 0) {
+      try {
+        applyBookmark(LAB.decodeBookmark(fromHash));
+      } catch (err) {
+        loadPreset('sevenSegmentDecoder');
+        setStatus(el.exprStatus, 'Bookmark ignored: ' + err.message + ' Loaded the default scenario instead.', 'error');
+      }
+    } else {
+      loadPreset('sevenSegmentDecoder');
+    }
+    initLab();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
