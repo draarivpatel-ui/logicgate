@@ -705,6 +705,17 @@ test('runtime files make no network requests and use no external assets', functi
   });
 });
 
+test('CSP meta locks the page to self-hosted resources and forbids plugin objects', function () {
+  var html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+  var m = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)"/);
+  assert.ok(m, 'index.html is missing a Content-Security-Policy meta tag');
+  ["default-src 'none'", "script-src 'self'", "connect-src 'none'", "object-src 'none'"].forEach(function (d) {
+    assert.ok(m[1].includes(d), 'CSP is missing ' + d);
+  });
+  var inlineHandlers = html.match(/\son[a-z]+\s*=/g) || [];
+  assert.deepEqual(inlineHandlers, [], 'CSP cannot express inline handler permissions');
+});
+
 test('package test script and CI both run every suite file', function () {
   var pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   var suites = ['test.js', 'regression-test.js', 'export-test.js', 'ui-test.js', 'adversarial-test.js', 'revamp-test.js'];
