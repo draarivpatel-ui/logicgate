@@ -50,7 +50,7 @@ Verified on Node v26.8.1 with:
 npm test
 ```
 
-**622 passed, 0 failed, 0 skipped.**
+**623 passed, 0 failed, 0 skipped.**
 
 | Check | Verified coverage |
 | --- | --- |
@@ -58,7 +58,7 @@ npm test
 | Adversarial depth, sequential and UI-fence checks | 19 |
 | Independent Verilog compiler/simulator checks | 48 |
 | DOM interaction tests | 25 |
-| Revamp oracle and accessibility checks | 53 |
+| Revamp oracle and accessibility checks | 54 |
 | Timing, hazard, structural and integrity lab checks | 403 |
 | Two-variable care specifications | All 81 disjoint on/don't-care combinations |
 | Three-variable Boolean functions | All 256, with an independent term/literal oracle |

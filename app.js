@@ -470,7 +470,7 @@
       if (firstBox) {
         var label = svg('g');
         label.appendChild(svg('rect', { x: firstBox.x + 2, y: firstBox.y + 2, width: 16, height: 15, fill: color, stroke: cssVar('--surface-1'), 'stroke-width': 1 }));
-        label.appendChild(svg('text', { x: firstBox.x + 10, y: firstBox.y + 13, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700, fill: '#ffffff' }, String(gi + 1)));
+        label.appendChild(svg('text', { x: firstBox.x + 10, y: firstBox.y + 13, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700, fill: cssVar('--accent-ink') }, String(gi + 1)));
         svgTitle(label, 'Group ' + (gi + 1) + ': ' + (state.form === 'POS' ? r.pos : r.sop).terms[gi]);
         root.appendChild(label);
       }
