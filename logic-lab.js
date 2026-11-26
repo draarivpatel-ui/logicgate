@@ -1017,8 +1017,9 @@
      reinterpreted as a formula gets a leading apostrophe; quoting follows
      RFC 4180 (double the inner quotes, wrap on comma/quote/newline). */
   function csvField(value) {
+    var numeric = typeof value === 'number' && Number.isFinite(value);
     var s = value == null ? '' : String(value);
-    if (/^[=+\-@\t]/.test(s)) s = "'" + s;
+    if (!numeric && /^[\s\p{Cf}\p{Cc}]*[=+\-@\t\r]/u.test(s)) s = "'" + s;
     if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
     return s;
   }
