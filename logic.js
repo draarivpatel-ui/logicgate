@@ -666,16 +666,6 @@
     return complemented ? '(' + parts.join(' + ') + ')' : parts.join(sep);
   }
 
-  function buildSolution(imp, kind, names, numVars) {
-    return {
-      terms: [implicantToText(imp, names, numVars, kind === 'POS')],
-      product: implicantToProduct(imp, names, numVars, kind === 'POS'),
-      minterms: imp.minterms.slice(),
-      cube: { mask: imp.mask, value: imp.value, literals: literalCost(imp) },
-      size: imp.minterms.length
-    };
-  }
-
   function metricsFor(chosen, kind, names, numVars) {
     var terms = [];
     var products = [];
